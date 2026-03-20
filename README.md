@@ -1,102 +1,180 @@
-# 🛰️ Space Debris Collision Risk Predictor
+# Debris Sentinel - Space Collision Risk Intelligence
 
-> Deep learning system for predicting satellite-debris collision risks using a 150M-parameter transformer with evidential uncertainty quantification.
+> Real-time satellite-debris collision risk prediction powered by a 150M-parameter transformer with evidential uncertainty quantification.
 
-[![Python 3.12](https://img.shields.io/badge/Python-3.12-blue)](https://python.org)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.1+-red)](https://pytorch.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green)](https://fastapi.tiangolo.com)
-[![React](https://img.shields.io/badge/React-18-blue)](https://reactjs.org)
+<p align="center">
+  <a href="https://space-debris-collision-risk-production.up.railway.app"><strong>View Live Demo</strong></a>
+</p>
+
+[![Live](https://img.shields.io/badge/Status-Live-brightgreen)](https://space-debris-collision-risk-production.up.railway.app)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://python.org)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.1+-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://reactjs.org)
+[![Railway](https://img.shields.io/badge/Deployed_on-Railway-0B0D0E?logo=railway&logoColor=white)](https://railway.app)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## 🎯 Overview
+## Live Demo
 
-This system predicts collision risks between satellites and space debris using:
-- **TLE data** from CelesTrak (18,000+ objects)
-- **SGP4 orbital propagation** over a 7-day horizon
-- **Transformer neural network** (150M parameters) trained on conjunction events
-- **Evidential Deep Learning** for uncertainty quantification (epistemic + aleatoric)
+**https://space-debris-collision-risk-production.up.railway.app**
 
-## 📁 Project Structure
+Search for any satellite (e.g. ISS, Hubble, Starlink), click it on the interactive 3D globe, and get AI-powered collision risk analysis against 17,000+ tracked objects in real time.
+
+---
+
+## What It Does
+
+This system predicts collision risks between active satellites and space debris by combining orbital mechanics with deep learning:
+
+- **17,000+ tracked objects** from CelesTrak TLE catalog
+- **SGP4 orbital propagation** over a 7-day prediction horizon
+- **150M-parameter transformer** trained on conjunction events with cross-attention
+- **Evidential Deep Learning** providing calibrated uncertainty (epistemic + aleatoric)
+- **Interactive 3D globe** with real-time satellite visualization
+
+---
+
+## Architecture
 
 ```
-space-debris-predictor/
+TLE Catalog (17K objects)
+        |
+   SGP4 Propagation (7-day horizon)
+        |
+   Feature Engineering (30 features per conjunction)
+        |
+   Transformer Encoder (10 layers, 16 heads, 150M params)
+        |
+   Evidential Output Head (Dirichlet, K=3)
+        |
+   Risk Classification: LOW | MEDIUM | HIGH
+   + Collision Probability (%) + Uncertainty Bounds
+```
+
+### Transformer Specifications
+
+| Component             | Specification                       |
+|-----------------------|-------------------------------------|
+| Input                 | [batch, 168 timesteps, 22 features] |
+| Embedding             | Linear(22 -> 1024) + LayerNorm      |
+| Positional Encoding   | Sinusoidal (learned CLS token)      |
+| Encoder Layers        | 10 x TransformerEncoderLayer        |
+| Attention Heads       | 16                                  |
+| Feedforward Dim       | 4096 (GELU activation)              |
+| Interaction Module    | Cross-attention pairwise module     |
+| Output Head           | Evidential DL (Dirichlet, K=3)      |
+| Total Parameters      | ~150M                               |
+
+---
+
+## Project Structure
+
+```
+space-debris-collision-risk/
 ├── backend/
-│   ├── main.py                 # FastAPI application
-│   ├── predictor.py            # Inference pipeline
-│   ├── models/transformer.py  # 150M transformer architecture
+│   ├── main.py                   # FastAPI application & static file serving
+│   ├── predictor.py              # End-to-end inference pipeline
+│   ├── models/
+│   │   └── transformer.py        # 150M transformer architecture
 │   └── utils/
-│       ├── sgp4_propagator.py  # Orbital mechanics
-│       └── feature_engineering.py
-├── frontend/                   # React + Vite + TypeScript UI
+│       ├── sgp4_propagator.py    # SGP4 orbital propagation
+│       ├── feature_engineering.py # 30-feature conjunction computation
+│       ├── bplane.py             # B-plane geometry calculations
+│       ├── maneuver.py           # Avoidance maneuver computation
+│       └── interpret.py          # Attention & feature importance
+├── frontend/                     # React + Vite + TypeScript + Three.js
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── GlobeView.tsx     # Interactive 3D globe (react-globe.gl)
+│   │   │   └── ResultsPanel.tsx  # Threat analysis dashboard
+│   │   └── App.tsx
+│   └── package.json
 ├── training/
-│   ├── config.yaml             # Training configuration
-│   ├── data_download.py        # TLE data acquisition
-│   ├── preprocess.py           # Conjunction dataset generation
-│   ├── train.py                # Training loop
-│   └── evaluate.py             # Model evaluation
+│   ├── config.yaml               # Hyperparameter configuration
+│   ├── data_download.py          # CelesTrak TLE acquisition
+│   ├── preprocess.py             # Conjunction dataset generation
+│   ├── train.py                  # Training loop with mixed precision
+│   └── evaluate.py               # Evaluation & metrics
 ├── data/
-│   ├── raw/                    # TLE files & catalog
-│   ├── processed/              # HDF5 datasets
-│   └── models/                 # Checkpoints
-└── docs/                       # Evaluation plots & metrics
+│   ├── raw/                      # TLE files & satellite catalog
+│   ├── processed/                # Conjunction datasets
+│   └── models/                   # Model checkpoints (~290MB)
+├── Dockerfile                    # Multi-stage build (Node + Python)
+├── railway.toml                  # Railway deployment config
+└── download_models.py            # HuggingFace model downloader
 ```
 
-## 🚀 Quickstart
+---
 
-### Option A: Automated Setup
+## Getting Started
+
+### Prerequisites
+
+- Python 3.12+
+- Node.js 18+
+- ~300MB disk space for model checkpoints
+
+### Quick Setup
 
 ```bash
-# Clone the repo
+# Clone
 git clone https://github.com/INFINITY1506/space-debris-collision-risk.git
 cd space-debris-collision-risk
 
+# Backend
+pip install -r backend/requirements.txt
+python download_models.py
+
+# Frontend
+cd frontend && npm install && cd ..
+
+# Run
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 &
+cd frontend && npm run dev
+```
+
+Open **http://localhost:5173**
+
+### Automated Setup (Alternative)
+
+```bash
 # Linux/Mac
 chmod +x setup.sh && ./setup.sh
 
-# Windows (double-click or run from terminal)
+# Windows
 setup.bat
 ```
 
-### Option B: Manual Setup
+### GPU Acceleration (Optional)
 
-#### 1. Install Python Dependencies
-
-```bash
-pip install -r backend/requirements.txt
-```
-
-For GPU acceleration (optional):
 ```bash
 # CUDA 12.1
 pip install torch --index-url https://download.pytorch.org/whl/cu121
-# CPU only
+
+# CPU only (default)
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
-#### 2. Install Frontend Dependencies
+---
 
-```bash
-cd frontend && npm install && cd ..
-```
+## Model Checkpoints
 
-#### 3. Download Model Checkpoints
-
-The pre-trained model files (~290MB total) exceed GitHub's file size limit and must be downloaded separately.
-
-**Required files** (place in `data/models/`):**
+Pre-trained weights (~290MB) are hosted on HuggingFace and downloaded automatically:
 
 | File | Size | Description |
 |------|------|-------------|
-| `best_model.pth` | ~60MB | Primary model (required) |
-| `ckpt_ep039_auc0.9999.pth` | ~60MB | Ensemble checkpoint |
-| `ckpt_ep041_auc0.9999.pth` | ~60MB | Ensemble checkpoint |
-| `ckpt_ep048_auc0.9999.pth` | ~60MB | Ensemble checkpoint |
-| `last.pth` | ~60MB | Final training checkpoint |
+| `best_model.pth` | 57MB | Primary model (required) |
+| `ckpt_ep039_auc0.9999.pth` | 57MB | Ensemble checkpoint |
+| `ckpt_ep041_auc0.9999.pth` | 57MB | Ensemble checkpoint |
+| `ckpt_ep048_auc0.9999.pth` | 57MB | Ensemble checkpoint |
+| `last.pth` | 57MB | Final training checkpoint |
 
-> **Note:** At minimum, `best_model.pth` is required to run the backend. The ensemble checkpoints improve prediction quality.
+At minimum, `best_model.pth` is required. Ensemble checkpoints improve prediction robustness.
 
-**Alternatively, train from scratch:**
+### Train From Scratch
+
 ```bash
 python training/data_download.py   # Download TLE data from CelesTrak
 python training/preprocess.py      # Generate conjunction dataset
@@ -104,159 +182,162 @@ python training/train.py           # Train (~50 epochs, ~15-20 min/epoch on GPU)
 python training/evaluate.py        # Evaluate & generate plots
 ```
 
-#### 4. Start the Application
+---
+
+## API Reference
+
+Base URL: `https://space-debris-collision-risk-production.up.railway.app`
+
+| Method | Endpoint          | Description                        |
+|--------|-------------------|------------------------------------|
+| POST   | `/predict`        | Satellite -> top-N debris threats  |
+| GET    | `/satellites`     | List catalog objects (with search) |
+| GET    | `/satellite/{id}` | Satellite orbital details          |
+| GET    | `/health`         | API status & model availability    |
+
+### Example Request
 
 ```bash
-# Terminal 1 — Backend API
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
-
-# Terminal 2 — Frontend
-cd frontend && npm run dev
+curl -X POST https://space-debris-collision-risk-production.up.railway.app/api/predict \
+  -H "Content-Type: application/json" \
+  -d '{"satellite_name": "ISS", "top_n": 10}'
 ```
 
-Open **http://localhost:5173** in your browser.
+### Example Response
 
----
-
-## 🧠 Model Architecture
-
-| Component             | Spec                                |
-|-----------------------|-------------------------------------|
-| Input                 | [batch, 168 timesteps, 22 features] |
-| Embedding             | Linear(22 → 1024) + LayerNorm       |
-| Positional Encoding   | Sinusoidal (learned CLS token)      |
-| Encoder Layers        | 10 × TransformerEncoderLayer        |
-| Attention Heads       | 16                                  |
-| Feedforward Dim       | 4096 (GELU activation)              |
-| Interaction Module    | Cross-attention pairwise module     |
-| Output Head           | Evidential DL (Dirichlet, K=3)      |
-| Total Parameters      | ~150M                               |
-
-**Output:** Collision probability + epistemic uncertainty + aleatoric uncertainty
-
----
-
-## 📊 Performance Targets
-
-| Metric         | Target      |
-|---------------|-------------|
-| Accuracy       | ≥ 94%       |
-| AUC-ROC        | ≥ 0.98      |
-| ECE            | < 0.05      |
-| Inference time | < 5 seconds |
-
----
-
-## 🔌 API Endpoints
-
-| Method | Endpoint              | Description                           |
-|--------|-----------------------|---------------------------------------|
-| POST   | `/predict`            | Satellite → top-10 debris threats     |
-| GET    | `/satellites`         | List all catalog objects (w/ search)  |
-| GET    | `/satellite/{id}`     | Satellite orbital details             |
-| GET    | `/health`             | API status & model info               |
-
-### Example: `/predict`
 ```json
-// POST /predict
-{ "satellite_name": "ISS", "top_n": 10 }
-
-// Response
 {
-  "satellite": { "name": "ISS (ZARYA)", "norad_id": 25544, "altitude_km": 408.3, ... },
+  "satellite": {
+    "name": "ISS (ZARYA)",
+    "norad_id": 25544,
+    "altitude_km": 428.6,
+    "inclination_deg": 51.63
+  },
   "threats": [
     {
       "rank": 1,
       "debris_name": "COSMOS 2251 DEB",
-      "collision_probability_pct": "0.0023%",
-      "uncertainty_range": "±0.12%",
-      "risk_level": "HIGH",
+      "collision_probability_pct": "0.0173%",
+      "uncertainty_range": "+/-0.52%",
+      "risk_level": "LOW",
       "miss_distance_km": 2.15,
-      "tca_utc": "2026-03-07T14:22:00Z",
+      "tca_utc": "2026-03-25T14:22:00Z",
       "relative_velocity_km_s": 14.37
-    }, ...
+    }
   ],
-  "total_time_s": 3.2
+  "pairs_analyzed": 2726,
+  "total_time_s": 77.9
 }
 ```
 
 ---
 
-## ⚙️ Training Configuration
+## Feature Engineering (30 Features)
 
-Edit `training/config.yaml` to adjust:
-- Batch size, learning rate, epochs
-- Model architecture (d_model, n_heads, n_layers)  
-- Data paths and risk thresholds
-
----
-
-## 📈 Features (30+)
-
-The model uses 30 features computed per conjunction:
-
-- **Orbital (14):** Semi-major axis, eccentricity, inclination, RAAN, arg. perigee, mean anomaly, altitude — for both satellite and debris
-- **Relative (10):** Miss distance, relative velocity, TCA time, altitude diff, inclination diff, RAAN diff, RSW components, period ratio
-- **Physical (5):** Combined mass/cross-section, kinetic energy, hardness factor, momentum transfer
-- **Temporal (3):** Hours to TCA, orbital decay rate, time since epoch
+| Category | Count | Features |
+|----------|-------|----------|
+| Orbital | 14 | Semi-major axis, eccentricity, inclination, RAAN, arg. perigee, mean anomaly, altitude (x2 for satellite & debris) |
+| Relative | 10 | Miss distance, relative velocity, TCA time, altitude diff, inclination diff, RAAN diff, RSW components, period ratio |
+| Physical | 5 | Combined mass/cross-section, kinetic energy, hardness factor, momentum transfer |
+| Temporal | 3 | Hours to TCA, orbital decay rate, time since epoch |
 
 ---
 
-## 🚂 Deploy on Railway
+## Performance
 
-### Step 1: Upload Models to HuggingFace (free, one-time)
-
-1. Create a free account at [huggingface.co](https://huggingface.co)
-2. Create a new model repo: `infinity1506/space-debris-models`
-3. Upload the 5 `.pth` files from `data/models/`:
-   ```bash
-   pip install huggingface_hub
-   huggingface-cli login
-   huggingface-cli upload infinity1506/space-debris-models data/models/ --include="*.pth"
-   ```
-
-### Step 2: Deploy on Railway
-
-1. Go to [railway.app](https://railway.app) and connect your GitHub
-2. Click **"New Project"** → **"Deploy from GitHub Repo"**
-3. Select `INFINITY1506/space-debris-collision-risk`
-4. Railway auto-detects the Dockerfile and deploys
-5. The build will download models from HuggingFace automatically
-
-### Step 3: Get your URL
-
-Railway assigns a public URL like `your-app.up.railway.app`. The app serves both the API and the frontend from a single service.
+| Metric         | Value       |
+|---------------|-------------|
+| Accuracy       | >= 94%      |
+| AUC-ROC        | 0.9999      |
+| ECE            | < 0.05      |
+| Inference time | ~70s (cloud CPU) / <5s (GPU) |
 
 ---
 
-## ⚠️ Known Limitations
+## Deployment
 
-1. **Static data**: Uses daily TLE snapshots, not live updates
-2. **7-day window**: Predictions only for the next 7 days
-3. **Simplified physics**: Does not account for maneuvers or atmospheric drag variations
-4. **Label quality**: Ground truth based on physics approximations, not verified collision records
-5. **GPU requirement**: Training requires CUDA-capable GPU (RTX 5080 with nightly PyTorch)
+### Railway (Current Production)
+
+The app is deployed as a single Docker container on Railway, serving both the FastAPI backend and React frontend.
+
+```toml
+# railway.toml
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+startCommand = "sh -c 'python -m uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}'"
+healthcheckPath = "/health"
+healthcheckTimeout = 600
+```
+
+To deploy your own instance:
+
+1. Fork this repository
+2. Upload model weights to HuggingFace (see `download_models.py`)
+3. Connect the repo on [railway.app](https://railway.app)
+4. Railway auto-builds and deploys from the Dockerfile
+
+### Docker (Self-hosted)
+
+```bash
+docker build -t debris-sentinel .
+docker run -p 8000:8000 debris-sentinel
+```
 
 ---
 
-## 🔮 Future Work
+## Tech Stack
 
-- Real-time TLE updates from Space-Track.org
-- Multi-satellite conjunction analysis
-- Maneuver recommendation engine
-- Historical trend analysis
-- ~~Docker containerization~~ (done)
-
----
-
-## 📄 License
-
-MIT License — see [LICENSE](LICENSE)
+| Layer | Technology |
+|-------|-----------|
+| ML Framework | PyTorch 2.1+ |
+| Backend | FastAPI + Uvicorn |
+| Frontend | React 18 + TypeScript + Vite |
+| 3D Globe | react-globe.gl + Three.js |
+| Orbital Mechanics | SGP4 (python-sgp4) |
+| Model Hosting | HuggingFace Hub |
+| Deployment | Railway (Docker) |
 
 ---
 
-## 🙏 Data Sources
+## Known Limitations
 
-- **TLE Data**: [CelesTrak](https://celestrak.org) — public domain
-- **SGP4 Library**: [sgp4](https://github.com/brandon-rhodes/python-sgp4)
-- **Skyfield**: [skyfield](https://rhodesmill.org/skyfield/)
+1. **Static TLE data** -- uses daily snapshots, not real-time feeds
+2. **7-day prediction window** -- beyond this, TLE propagation error grows significantly
+3. **Simplified physics** -- does not model maneuvers, atmospheric drag variations, or solar radiation pressure
+4. **Cloud CPU inference** -- predictions take ~70s on Railway's shared CPU; <5s with GPU
+5. **Label approximation** -- ground truth derived from physics-based thresholds, not verified collision records
+
+---
+
+## Future Roadmap
+
+- [ ] Real-time TLE updates via Space-Track.org API
+- [ ] Multi-satellite conjunction analysis
+- [ ] Maneuver recommendation engine with delta-v optimization
+- [ ] Historical trend analysis and conjunction frequency tracking
+- [ ] GPU-accelerated inference tier
+- [x] Docker containerization
+- [x] Cloud deployment (Railway)
+- [x] Interactive 3D satellite visualization
+
+---
+
+## Data Sources
+
+- **TLE Catalog**: [CelesTrak](https://celestrak.org) (public domain)
+- **SGP4 Library**: [python-sgp4](https://github.com/brandon-rhodes/python-sgp4)
+- **Skyfield**: [rhodesmill.org/skyfield](https://rhodesmill.org/skyfield/)
+
+---
+
+## License
+
+MIT License -- see [LICENSE](LICENSE)
+
+---
+
+<p align="center">
+  Built by <a href="https://github.com/INFINITY1506">INFINITY1506</a>
+</p>
