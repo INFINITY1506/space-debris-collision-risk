@@ -42,6 +42,24 @@ log = logging.getLogger(__name__)
 RISK_LABELS = ["LOW", "MEDIUM", "HIGH"]
 RISK_COLORS = {"LOW": "green", "MEDIUM": "yellow", "HIGH": "red"}
 
+# Earth constants for altitude estimation from TLE
+_MU_EARTH = 398600.4418  # km^3/s^2
+_R_EARTH  = 6371.0       # km
+
+
+def _altitude_from_tle_line2(line2: str) -> Optional[float]:
+    """Estimate mean altitude (km) from TLE line 2 mean motion (rev/day).
+    This avoids full SGP4 propagation just to get approximate altitude."""
+    try:
+        mean_motion = float(line2[52:63])  # rev/day
+        if mean_motion <= 0:
+            return None
+        n_rad_s = mean_motion * 2 * np.pi / 86400.0  # rad/s
+        a = (_MU_EARTH / (n_rad_s ** 2)) ** (1.0 / 3.0)  # semi-major axis km
+        return a - _R_EARTH  # altitude
+    except (ValueError, IndexError):
+        return None
+
 
 class SatellitePredictor:
     """
@@ -302,10 +320,21 @@ class SatellitePredictor:
 
         log.info(f"Predicting for: {sat_row['name']} (NORAD {sat_row['norad_id']})")
 
-        # --- Propagate ---
+        # --- Pre-filter by altitude band (huge speedup) ---
         t_prop_start = time.time()
-        # Use all non-primary objects as potential debris
+        sat_alt = _altitude_from_tle_line2(str(sat_row["line2"]))
+        alt_margin = 200  # km — only consider objects within ±200km altitude
         debris_rows = self.catalog[self.catalog["norad_id"] != int(sat_row["norad_id"])]
+
+        if sat_alt is not None:
+            debris_alts = debris_rows["line2"].apply(lambda l2: _altitude_from_tle_line2(str(l2)))
+            alt_mask = debris_alts.apply(
+                lambda a: a is not None and abs(a - sat_alt) < alt_margin
+            )
+            debris_rows = debris_rows[alt_mask]
+            log.info(f"Altitude pre-filter: {alt_mask.sum():,} / {len(alt_mask):,} objects within ±{alt_margin}km of {sat_alt:.0f}km")
+
+        # --- Propagate ---
         sat_pos, debris_positions, times_unix = self._propagate_pair(sat_row, debris_rows)
         t_prop = time.time() - t_prop_start
 
