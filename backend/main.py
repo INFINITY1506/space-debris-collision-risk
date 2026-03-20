@@ -89,10 +89,11 @@ def check_rate_limit(client_ip: str) -> bool:
 # ---------------------------------------------------------------------------
 # Lifespan: load model on startup
 # ---------------------------------------------------------------------------
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+def _load_model():
+    """Load the ML model in a background thread so the server can respond to
+    healthchecks immediately while the (slow) model load is in progress."""
     global predictor
-    log.info("Starting up — loading predictor...")
+    log.info("Background model load started...")
     try:
         norm_path = NORM_PATH if NORM_PATH.exists() else None
         predictor = SatellitePredictor(
@@ -106,6 +107,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.error(f"Failed to load predictor: {e}")
         predictor = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start model loading in a background thread — don't block the server
+    import threading
+    loader = threading.Thread(target=_load_model, daemon=True)
+    loader.start()
+    log.info("Server started — model loading in background...")
     yield
     # Cleanup on shutdown
     log.info("Shutting down...")
