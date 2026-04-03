@@ -363,14 +363,17 @@ class SatellitePredictor:
         t_infer = time.time() - t_infer_start
 
         # --- Rank and format results ---
-        # Score = P(HIGH) * 0.6 + P(MEDIUM) * 0.3 + (1 - min_dist_norm) * 0.1
+        # Hybrid scoring: blend model confidence with physics-based miss distance.
+        # Physics thresholds (same as training labels):
+        #   HIGH:   miss distance < 1.0 km
+        #   MEDIUM: miss distance < 5.0 km
+        #   LOW:    miss distance >= 5.0 km
         high_probs = probs[:, 2]
         med_probs  = probs[:, 1]
-        low_probs  = probs[:, 0]
 
         distances = np.array([p["min_distance_km"] for p in pair_info])
         dist_norm = np.clip(distances / 10.0, 0, 1)  # normalize to [0, 1]
-        scores = high_probs * 0.6 + med_probs * 0.3 + (1 - dist_norm) * 0.1
+        scores = high_probs * 0.3 + med_probs * 0.2 + (1 - dist_norm) * 0.5
 
         ranked_idx = np.argsort(scores)[::-1][:top_n]
 
@@ -378,8 +381,16 @@ class SatellitePredictor:
         for i, idx in enumerate(ranked_idx):
             info = pair_info[idx]
             p = probs[idx]
-            risk_class = int(np.argmax(p))
-            risk_label = RISK_LABELS[risk_class]
+            miss_km = info["min_distance_km"]
+
+            # Hybrid risk label: physics-based from miss distance
+            if miss_km < 1.0:
+                risk_label = "HIGH"
+            elif miss_km < 5.0:
+                risk_label = "MEDIUM"
+            else:
+                risk_label = "LOW"
+
             collision_prob = max(float(p[2] * 0.1), info["physics_probability"])  # blend both estimates
 
             threats.append({
