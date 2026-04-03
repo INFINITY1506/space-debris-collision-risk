@@ -19,6 +19,7 @@ env/
 # Data files (large)
 data/processed/*.h5
 data/processed/*.npz
+!data/processed/normalization.npz
 data/models/runs/
 *.tle
 

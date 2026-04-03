@@ -27,6 +27,13 @@ MODEL_FILES = [
     "last.pth",
 ]
 
+# Normalization parameters (required for correct inference)
+NORM_DIR = Path(__file__).parent / "data" / "processed"
+NORM_DIR.mkdir(parents=True, exist_ok=True)
+NORM_FILES = [
+    "normalization.npz",
+]
+
 
 def download_from_huggingface():
     """Download model files from HuggingFace Hub."""
@@ -63,6 +70,25 @@ def download_from_huggingface():
             print(f"\n  Make sure the repo '{HF_REPO_ID}' exists and is public.")
             print(f"  Create it at: https://huggingface.co/new")
             sys.exit(1)
+
+    # Download normalization parameters
+    for filename in NORM_FILES:
+        dest = NORM_DIR / filename
+        if dest.exists():
+            print(f"  [SKIP] {filename} already exists")
+            continue
+
+        print(f"  [DOWN] {filename} ...", end=" ", flush=True)
+        try:
+            path = hf_hub_download(
+                repo_id=HF_REPO_ID,
+                filename=filename,
+                local_dir=str(NORM_DIR),
+                local_dir_use_symlinks=False,
+            )
+            print(f"OK")
+        except Exception as e:
+            print(f"  [WARN] {filename} not found on HuggingFace, skipping (model will use default normalization)")
 
     print("\nAll models downloaded successfully!")
 
