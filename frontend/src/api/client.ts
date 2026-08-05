@@ -23,6 +23,7 @@ export interface ThreatItem {
     tca_utc: string;
     tca_timestamp: number;
     relative_velocity_km_s: number;
+    debris_source?: string;
 }
 
 export interface SatelliteInfo {
@@ -41,6 +42,7 @@ export interface PredictResponse {
     propagation_time_s: number;
     inference_time_s: number;
     total_time_s: number;
+    ranking_basis?: string;
     message?: string;
 }
 
@@ -61,6 +63,8 @@ export interface HealthResponse {
     version: string;
     timestamp: string;
     device: string;
+    catalog_age_hours?: number | null;
+    detail?: string | null;
 }
 
 // ────── Detailed / Advanced Types ─────────────────────────────────────────
@@ -231,8 +235,10 @@ export async function getSatellite(noradId: number): Promise<SatelliteListItem &
 
 export async function getHealth(): Promise<HealthResponse> {
     const res = await fetch(`${API_BASE_URL}/health`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    const data = await res.json();
+    // A 503 means startup is still refreshing data/loading the checkpoint.
+    if (!res.ok && res.status !== 503) throw new Error(`HTTP ${res.status}`);
+    return data;
 }
 
 export async function predictDetailed(

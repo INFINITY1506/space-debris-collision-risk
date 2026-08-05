@@ -1,5 +1,5 @@
 # ============================================================
-# Space Debris Collision Risk Predictor — Railway Deployment
+# Debris Sentinel — Cloud Run deployment
 # ============================================================
 # Multi-stage build: frontend (static) + backend (FastAPI)
 # ============================================================
@@ -22,9 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies (CPU-only torch to save memory)
-COPY backend/requirements.txt ./backend/requirements.txt
+COPY backend/requirements-runtime.txt ./backend/requirements-runtime.txt
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir -r backend/requirements.txt && \
+    pip install --no-cache-dir -r backend/requirements-runtime.txt && \
     pip install --no-cache-dir huggingface_hub
 
 # Copy application code
@@ -38,11 +38,16 @@ COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 # Download model checkpoints from HuggingFace
 ARG HF_REPO_ID=infinity1506/space-debris-models
-ENV HF_REPO_ID=${HF_REPO_ID}
+ARG HF_REVISION=6a0bb8dfd51c244e06fcdf34c6cc88c52b3864ec
+ENV HF_REPO_ID=${HF_REPO_ID} \
+    HF_REVISION=${HF_REVISION}
 RUN python download_models.py
 
-# Expose port (Railway sets PORT env var)
-ENV PORT=8000
+# Cloud Run supplies PORT. Thread limits keep one inference request predictable.
+ENV PORT=8080 \
+    PYTHONUNBUFFERED=1 \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1
 EXPOSE ${PORT}
 
 # Start backend (serves API + static frontend)

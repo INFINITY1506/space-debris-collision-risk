@@ -23,7 +23,19 @@ export default function App() {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [rightPanelOpen, setRightPanelOpen] = useState(false);
 
-    useEffect(() => { getHealth().then(setHealth).catch(() => setHealth(null)); }, []);
+    useEffect(() => {
+        let cancelled = false;
+        const checkHealth = () => getHealth()
+            .then(data => { if (!cancelled) setHealth(data); })
+            .catch(() => { if (!cancelled) setHealth(null); });
+
+        checkHealth();
+        const timer = window.setInterval(checkHealth, 5000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+        };
+    }, []);
 
     const handleSearch = async (name: string) => {
         setLoading(true); setError(null); setResult(null); setDetailed(null); setLastQuery(name);

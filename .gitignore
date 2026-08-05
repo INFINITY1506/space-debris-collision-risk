@@ -21,6 +21,8 @@ data/processed/*.h5
 data/processed/*.npz
 !data/processed/normalization.npz
 data/models/runs/
+data/models/.cache/
+data/processed/.cache/
 *.tle
 
 # Model checkpoints (too large for GitHub — use Git LFS or download separately)

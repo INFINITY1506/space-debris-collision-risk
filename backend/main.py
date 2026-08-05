@@ -21,7 +21,7 @@ import numpy as np
 from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def _sanitize(obj):
@@ -48,6 +48,7 @@ from pydantic import BaseModel, field_validator
 # Import predictor
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from backend.predictor import SatellitePredictor
+from backend.catalog import ensure_catalog_fresh
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -60,11 +61,17 @@ MODEL_PATH   = Path(os.getenv("MODEL_PATH",   str(_ROOT / "data/models/best_mode
 CATALOG_PATH = Path(os.getenv("CATALOG_PATH", str(_ROOT / "data/raw/catalog.csv")))
 NORM_PATH    = Path(os.getenv("NORM_PATH",    str(_ROOT / "data/processed/normalization.npz")))
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+CATALOG_MAX_AGE_HOURS = float(os.getenv("CATALOG_MAX_AGE_HOURS", "48"))
+REFRESH_TLE_ON_STARTUP = os.getenv("REFRESH_TLE_ON_STARTUP", "true").lower() in {"1", "true", "yes"}
+ALLOW_STALE_CATALOG = os.getenv("ALLOW_STALE_CATALOG", "false").lower() in {"1", "true", "yes"}
 
 # ---------------------------------------------------------------------------
 # Global predictor instance (shared across requests)
 # ---------------------------------------------------------------------------
 predictor: Optional[SatellitePredictor] = None
+predictor_state = "not_started"
+predictor_error: Optional[str] = None
+loaded_catalog_age_hours: Optional[float] = None
 
 # ---------------------------------------------------------------------------
 # Rate limiting (simple in-memory, per-IP)
@@ -92,20 +99,30 @@ def check_rate_limit(client_ip: str) -> bool:
 def _load_model():
     """Load the ML model in a background thread so the server can respond to
     healthchecks immediately while the (slow) model load is in progress."""
-    global predictor
+    global predictor, predictor_state, predictor_error, loaded_catalog_age_hours
+    predictor_state = "loading"
+    predictor_error = None
     log.info("Background model load started...")
     try:
-        norm_path = NORM_PATH if NORM_PATH.exists() else None
+        loaded_catalog_age_hours = ensure_catalog_fresh(
+            CATALOG_PATH,
+            max_age_hours=CATALOG_MAX_AGE_HOURS,
+            refresh=REFRESH_TLE_ON_STARTUP,
+            allow_stale=ALLOW_STALE_CATALOG,
+        )
         predictor = SatellitePredictor(
             model_path=MODEL_PATH,
             catalog_path=CATALOG_PATH,
-            norm_path=norm_path,
+            norm_path=NORM_PATH,
             device="auto",
             batch_size=512,
         )
+        predictor_state = "ready"
         log.info("✅ Predictor loaded successfully")
     except Exception as e:
-        log.error(f"Failed to load predictor: {e}")
+        predictor_state = "error"
+        predictor_error = str(e)
+        log.exception("Failed to load predictor")
         predictor = None
 
 
@@ -127,8 +144,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Space Debris Collision Risk Predictor",
     description=(
-        "Deep learning API for predicting collision risks between satellites "
-        "and space debris using a 150M-parameter transformer model."
+        "Research-grade orbital screening API using SGP4 propagation, "
+        "physics-based ranking, and advisory model diagnostics."
     ),
     version="1.0.0",
     docs_url="/docs",
@@ -140,7 +157,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials="*" not in CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -161,8 +178,13 @@ async def strip_api_prefix(request: Request, call_next):
 # ---------------------------------------------------------------------------
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    client_ip = request.client.host if request.client else "unknown"
-    if request.url.path not in ("/health", "/docs", "/redoc", "/openapi.json"):
+    forwarded_for = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    client_ip = (
+        request.headers.get("cf-connecting-ip")
+        or forwarded_for
+        or (request.client.host if request.client else "unknown")
+    )
+    if request.url.path not in ("/health", "/api/health", "/docs", "/redoc", "/openapi.json"):
         if not check_rate_limit(client_ip):
             return JSONResponse(
                 status_code=429,
@@ -206,6 +228,7 @@ class ThreatItem(BaseModel):
     rank: int
     debris_name: str
     debris_norad_id: int
+    debris_source: Optional[str] = None
     collision_probability: float
     collision_probability_pct: str
     uncertainty_pct: float
@@ -229,6 +252,8 @@ class PredictResponse(BaseModel):
     propagation_time_s: float
     inference_time_s: float
     total_time_s: float
+    ranking_basis: Optional[str] = None
+    message: Optional[str] = None
 
 
 class DetailedPredictRequest(BaseModel):
@@ -289,22 +314,30 @@ class HealthResponse(BaseModel):
     version: str
     timestamp: str
     device: str
+    catalog_age_hours: Optional[float] = None
+    detail: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
-@app.get("/health", response_model=HealthResponse, tags=["System"])
+@app.get("/health", response_model=HealthResponse, responses={503: {"model": HealthResponse}}, tags=["System"])
 async def health_check():
-    """Check API status and model availability."""
-    return HealthResponse(
-        status="ok" if predictor and predictor.loaded else "degraded",
-        model_loaded=predictor is not None and predictor.loaded,
+    """Return 503 until the model and a sufficiently fresh catalog are ready."""
+    loaded = predictor is not None and predictor.loaded
+    payload = HealthResponse(
+        status="ok" if loaded else predictor_state,
+        model_loaded=loaded,
         catalog_size=len(predictor.catalog) if predictor else 0,
         version="1.0.0",
-        timestamp=datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        timestamp=datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         device=str(predictor.device) if predictor else "none",
+        catalog_age_hours=round(loaded_catalog_age_hours, 2) if loaded_catalog_age_hours is not None else None,
+        detail=predictor_error,
     )
+    if not loaded:
+        return JSONResponse(status_code=503, content=payload.model_dump())
+    return payload
 
 
 @app.post("/predict", tags=["Prediction"])

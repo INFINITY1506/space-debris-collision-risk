@@ -9,8 +9,8 @@ Models are saved to data/models/.
 """
 
 import os
-import sys
 import hashlib
+import sys
 from pathlib import Path
 
 MODEL_DIR = Path(__file__).parent / "data" / "models"
@@ -18,14 +18,21 @@ MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 # --- Change this to your HuggingFace repo ---
 HF_REPO_ID = os.getenv("HF_REPO_ID", "infinity1506/space-debris-models")
+HF_REVISION = os.getenv("HF_REVISION", "6a0bb8dfd51c244e06fcdf34c6cc88c52b3864ec")
+BEST_MODEL_SHA256 = os.getenv(
+    "BEST_MODEL_SHA256",
+    "4c45b63aab7bca2c9ddb5450590496da0b8d4755a06480ebe3ba12601682cc78",
+)
 
-MODEL_FILES = [
-    "best_model.pth",
+MODEL_FILES = ["best_model.pth"]
+ENSEMBLE_FILES = [
     "ckpt_ep039_auc0.9999.pth",
     "ckpt_ep041_auc0.9999.pth",
     "ckpt_ep048_auc0.9999.pth",
     "last.pth",
 ]
+if os.getenv("DOWNLOAD_ENSEMBLE", "false").lower() in {"1", "true", "yes"}:
+    MODEL_FILES.extend(ENSEMBLE_FILES)
 
 # Normalization parameters (required for correct inference)
 NORM_DIR = Path(__file__).parent / "data" / "processed"
@@ -35,14 +42,20 @@ NORM_FILES = [
 ]
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def download_from_huggingface():
     """Download model files from HuggingFace Hub."""
     try:
         from huggingface_hub import hf_hub_download
-    except ImportError:
-        print("Installing huggingface_hub...")
-        os.system(f"{sys.executable} -m pip install huggingface_hub")
-        from huggingface_hub import hf_hub_download
+    except ImportError as exc:
+        raise RuntimeError("Install huggingface_hub before downloading models") from exc
 
     print(f"Downloading models from HuggingFace: {HF_REPO_ID}")
     print(f"Saving to: {MODEL_DIR}")
@@ -60,9 +73,16 @@ def download_from_huggingface():
             path = hf_hub_download(
                 repo_id=HF_REPO_ID,
                 filename=filename,
+                revision=HF_REVISION,
                 local_dir=str(MODEL_DIR),
                 local_dir_use_symlinks=False,
             )
+            if filename == "best_model.pth":
+                digest = sha256_file(Path(path))
+                if digest != BEST_MODEL_SHA256:
+                    raise RuntimeError(
+                        f"Checksum mismatch for {filename}: expected {BEST_MODEL_SHA256}, got {digest}"
+                    )
             size_mb = Path(path).stat().st_size / (1024 * 1024)
             print(f"OK ({size_mb:.1f} MB)")
         except Exception as e:
@@ -83,12 +103,14 @@ def download_from_huggingface():
             path = hf_hub_download(
                 repo_id=HF_REPO_ID,
                 filename=filename,
+                revision=HF_REVISION,
                 local_dir=str(NORM_DIR),
                 local_dir_use_symlinks=False,
             )
             print(f"OK")
         except Exception as e:
-            print(f"  [WARN] {filename} not found on HuggingFace, skipping (model will use default normalization)")
+            print(f"FAILED: {e}")
+            raise
 
     print("\nAll models downloaded successfully!")
 
@@ -108,13 +130,18 @@ def download_from_url():
 
 
 if __name__ == "__main__":
-    # Check if models already exist
-    existing = [f for f in MODEL_FILES if (MODEL_DIR / f).exists()]
-    if len(existing) == len(MODEL_FILES):
-        print("All model files already present. Nothing to download.")
+    required_files = [(MODEL_DIR, f) for f in MODEL_FILES] + [(NORM_DIR, f) for f in NORM_FILES]
+    existing = [(directory, name) for directory, name in required_files if (directory / name).exists()]
+    if len(existing) == len(required_files):
+        digest = sha256_file(MODEL_DIR / "best_model.pth")
+        if digest != BEST_MODEL_SHA256:
+            raise RuntimeError(
+                f"Checksum mismatch for best_model.pth: expected {BEST_MODEL_SHA256}, got {digest}"
+            )
+        print("All model and normalization files already present. Nothing to download.")
         sys.exit(0)
 
-    missing = [f for f in MODEL_FILES if not (MODEL_DIR / f).exists()]
+    missing = [name for directory, name in required_files if not (directory / name).exists()]
     print(f"Missing {len(missing)} model file(s): {', '.join(missing)}")
     print()
 
