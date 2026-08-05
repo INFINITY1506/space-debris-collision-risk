@@ -37,6 +37,9 @@ SERVICE_URL="$(gcloud run services describe "$SERVICE" \
 
 echo "Deployment complete: $SERVICE_URL"
 curl --fail --silent --show-error \
+  --http1.1 \
+  --connect-timeout 10 \
+  --max-time 20 \
   --retry 60 \
   --retry-delay 5 \
   --retry-all-errors \
