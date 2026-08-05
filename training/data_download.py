@@ -12,14 +12,16 @@ import os
 import sys
 import time
 import logging
+import argparse
 import requests
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from sgp4.api import Satrec, jday
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Resolve data paths from the repository, independent of the launch directory.
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -27,7 +29,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-RAW_DIR = Path("data/raw")
+RAW_DIR = ROOT_DIR / "data" / "raw"
 TLE_SOURCES = [
     ("active",   "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle"),
     ("cosmos",   "https://celestrak.org/NORAD/elements/gp.php?GROUP=cosmos-2251-debris&FORMAT=tle"),
@@ -39,10 +41,10 @@ TLE_SOURCES = [
 HEADERS = {"User-Agent": "SpaceDebrisPredictor/1.0 (research project)"}
 
 
-def download_tle(name: str, url: str, retries: int = 3) -> str | None:
+def download_tle(name: str, url: str, retries: int = 3, use_cache: bool = False) -> str | None:
     """Download TLE data from a URL and save to data/raw/<name>.tle."""
     out_path = RAW_DIR / f"{name}.tle"
-    if out_path.exists():
+    if use_cache and out_path.exists():
         log.info(f"[CACHE] {name}.tle already exists, skipping download.")
         return out_path.read_text()
 
@@ -52,7 +54,7 @@ def download_tle(name: str, url: str, retries: int = 3) -> str | None:
             resp = requests.get(url, headers=HEADERS, timeout=30)
             resp.raise_for_status()
             text = resp.text.strip()
-            if len(text) < 100:
+            if len(text) < 100 or "\n1 " not in f"\n{text}" or "\n2 " not in f"\n{text}":
                 log.warning(f"Suspiciously short response for {name}: {len(text)} chars")
                 continue
             out_path.write_text(text)
@@ -140,13 +142,13 @@ def parse_tle_block(text: str, source: str) -> list[dict]:
     return records
 
 
-def build_catalog() -> pd.DataFrame:
+def build_catalog(use_cache: bool = False) -> pd.DataFrame:
     """Download all TLE sources and build a unified satellite catalog."""
     RAW_DIR.mkdir(parents=True, exist_ok=True)
 
     all_records = []
     for name, url in TLE_SOURCES:
-        text = download_tle(name, url)
+        text = download_tle(name, url, use_cache=use_cache)
         if text is None:
             log.warning(f"Skipping {name} — download failed.")
             continue
@@ -168,14 +170,26 @@ def build_catalog() -> pd.DataFrame:
     df = df.dropna(subset=["semi_major_axis_km", "inclination_deg"])
     log.info(f"After filtering invalid orbits: {len(df):,} objects")
 
-    # Save full catalog
+    required_sources = {"active", "cosmos", "fengyun", "iridium"}
+    missing_sources = required_sources.difference(set(df["source"].unique()))
+    if missing_sources or len(df) < 1_000:
+        raise RuntimeError(
+            "Downloaded catalog failed validation: "
+            f"rows={len(df):,}, missing_sources={sorted(missing_sources)}"
+        )
+
+    # Save atomically so a failed refresh never corrupts the last good catalog.
     catalog_path = RAW_DIR / "catalog.csv"
-    df.to_csv(catalog_path, index=False)
+    catalog_tmp = catalog_path.with_suffix(".csv.tmp")
+    df.to_csv(catalog_tmp, index=False)
+    catalog_tmp.replace(catalog_path)
     log.info(f"Catalog saved: {catalog_path} ({len(df):,} objects)")
 
     # Also save just the TLE line pairs (for later propagation)
     tle_pairs_path = RAW_DIR / "tle_pairs.csv"
-    df[["norad_id", "name", "line1", "line2", "source"]].to_csv(tle_pairs_path, index=False)
+    tle_pairs_tmp = tle_pairs_path.with_suffix(".csv.tmp")
+    df[["norad_id", "name", "line1", "line2", "source"]].to_csv(tle_pairs_tmp, index=False)
+    tle_pairs_tmp.replace(tle_pairs_path)
     log.info(f"TLE pairs saved: {tle_pairs_path}")
 
     return df
@@ -195,7 +209,14 @@ def print_summary(df: pd.DataFrame) -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--use-cache",
+        action="store_true",
+        help="Reuse downloaded .tle files instead of requesting fresh data.",
+    )
+    args = parser.parse_args()
     log.info("Starting TLE data download...")
-    df = build_catalog()
+    df = build_catalog(use_cache=args.use_cache)
     print_summary(df)
     log.info("✅ Data download complete.")

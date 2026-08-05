@@ -111,7 +111,8 @@ export function ResultsTable({ threats, satellite, meta }: Props) {
                                 {isExp && <tr><td colSpan={8} style={{ padding: 0 }}>
                                     <div style={{ padding: '10px 12px', background: 'rgba(255,255,255,.02)', borderTop: '1px solid var(--glass-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
                                         <div className="card" style={{ padding: 12, borderRadius: 6 }}>
-                                            <div style={{ fontSize: '.62rem', fontWeight: 600, color: 'var(--t3)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '.05em' }}>Class Probabilities</div>
+                                            <div style={{ fontSize: '.62rem', fontWeight: 600, color: 'var(--t3)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '.05em' }}>Advisory Model Diagnostics</div>
+                                            <div style={{ fontSize: '.61rem', color: 'var(--t4)', marginBottom: 7 }}>Not used to rank threats or calculate the displayed collision probability.</div>
                                             {[{ l: 'LOW', v: t.probability_low, c: '#22C55E' }, { l: 'MED', v: t.probability_medium, c: '#F59E0B' }, { l: 'HIGH', v: t.probability_high, c: '#EF4444' }].map(p => (
                                                 <div key={p.l} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
                                                     <span className="font-mono" style={{ width: 32, fontSize: '.62rem', fontWeight: 600, color: p.c }}>{p.l}</span>
