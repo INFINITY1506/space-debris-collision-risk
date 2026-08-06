@@ -2,7 +2,9 @@
 
 Debris Sentinel is a research-grade web application for screening close approaches between a selected satellite and public debris TLEs. It combines SGP4 propagation, explicit miss-distance ranking, a lightweight collision-probability estimate, and optional transformer diagnostics in an interactive 3D interface.
 
-Live service: [debris-sentinel-cd536idu7a-as.a.run.app](https://debris-sentinel-cd536idu7a-as.a.run.app)
+**Live demo:** [debrissentinel.com](https://debrissentinel.com)
+
+**API documentation:** [debrissentinel.com/docs](https://debrissentinel.com/docs)
 
 > **Safety notice:** This is a portfolio and research project, not an operational conjunction-assessment system. Do not use its results to make spacecraft maneuver or safety decisions. Operational decisions require authoritative ephemerides, covariance data, conjunction data messages, and expert review.
 
@@ -15,6 +17,18 @@ Live service: [debris-sentinel-cd536idu7a-as.a.run.app](https://debris-sentinel-
 - Shows an approximate physics-based collision probability and explicit risk thresholds.
 - Exposes the transformer output only as an advisory diagnostic; it does not control ranking, displayed collision probability, or risk level.
 - Serves a React/Three.js frontend and FastAPI API from one container.
+- Loads a balanced globe sample of active spacecraft and debris, with automatic cold-start recovery.
+
+## Portfolio highlights
+
+| Area | Implementation |
+|---|---|
+| Orbital mechanics | Seven-day SGP4 propagation and time-of-closest-approach screening |
+| Machine learning | PyTorch transformer diagnostics with uncertainty views |
+| Product interface | Responsive React dashboard with an interactive Three.js globe |
+| Backend | Typed FastAPI endpoints, validation, health checks, and rate limiting |
+| Reliability | Cold-start retries, catalog freshness enforcement, regression tests, and CI |
+| Delivery | Multi-stage Docker image, Google Cloud Run, custom domain, and managed HTTPS |
 
 The bundled checkpoint is approximately 5 million parameters (6 encoder layers, 8 heads, 256-dimensional embedding). Its reported validation metrics came from threshold-derived training data and should not be interpreted as operational collision-prediction performance.
 
@@ -71,7 +85,7 @@ cd frontend && npm run build && npm audit
 | `GET` | `/health` or `/api/health` | Readiness, catalog age, and model status |
 | `POST` | `/predict` or `/api/predict` | Top debris screening results |
 | `POST` | `/predict/detailed` | B-plane and Monte Carlo research views |
-| `GET` | `/satellites` | Search the current catalog |
+| `GET` | `/satellites` | Search/filter the current catalog (`kind=active|debris`) |
 | `GET` | `/satellite/{norad_id}` | Retrieve an object's orbital fields |
 | `POST` | `/maneuver` | Experimental maneuver illustration |
 | `POST` | `/interpret` | Experimental model interpretation |

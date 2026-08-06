@@ -36,3 +36,21 @@ def test_missing_checkpoint_fails_closed(tmp_path):
             norm_path=tmp_path / "normalization.npz",
             device="cpu",
         )
+
+
+def test_catalog_listing_can_select_active_or_debris_objects():
+    predictor = SatellitePredictor.__new__(SatellitePredictor)
+    predictor.catalog = pd.DataFrame(
+        [
+            {"norad_id": 1, "name": "ACTIVE ONE", "source": "active", "altitude_km": 400, "inclination_deg": 51},
+            {"norad_id": 2, "name": "ACTIVE TWO", "source": "active", "altitude_km": 500, "inclination_deg": 52},
+            {"norad_id": 3, "name": "COSMOS DEBRIS", "source": "cosmos", "altitude_km": 600, "inclination_deg": 53},
+            {"norad_id": 4, "name": "FENGYUN DEBRIS", "source": "fengyun", "altitude_km": 700, "inclination_deg": 54},
+        ]
+    )
+
+    active = predictor.list_satellites(limit=10, kind="active")
+    debris = predictor.list_satellites(limit=10, kind="debris")
+
+    assert [item["norad_id"] for item in active] == [1, 2]
+    assert [item["norad_id"] for item in debris] == [3, 4]
