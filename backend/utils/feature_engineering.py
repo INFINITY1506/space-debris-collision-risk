@@ -1,7 +1,7 @@
 """
 feature_engineering.py
 -----------------------
-Computes the full feature vector (30+ features) for each conjunction event.
+Computes the 32-element feature vector for each conjunction event.
 Used both during preprocessing and live inference.
 """
 
@@ -82,7 +82,7 @@ def compute_conjunction_features(
     secondary_area_m2: float = 0.01,   # default debris cross-section
 ) -> dict:
     """
-    Compute the full feature vector (30+ features) for a conjunction event.
+    Compute the 32-element feature vector for a conjunction event.
     Returns a dict of all features.
     """
     features = {}
@@ -201,7 +201,7 @@ def features_to_array(features: dict, feature_names: list | None = None) -> np.n
 
 
 def get_feature_names() -> list[str]:
-    """Return the canonical ordered list of 30 feature names."""
+    """Return the canonical ordered list of 32 feature names."""
     return [
         # Primary orbital (7)
         "primary_semi_major_axis", "primary_eccentricity", "primary_inclination",

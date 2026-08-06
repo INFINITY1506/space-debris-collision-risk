@@ -41,10 +41,20 @@ log = logging.getLogger(__name__)
 
 RISK_LABELS = ["LOW", "MEDIUM", "HIGH"]
 RISK_COLORS = {"LOW": "green", "MEDIUM": "yellow", "HIGH": "red"}
+DEBRIS_SOURCES = frozenset({"cosmos", "fengyun", "iridium", "debris"})
 
 # Earth constants for altitude estimation from TLE
 _MU_EARTH = 398600.4418  # km^3/s^2
 _R_EARTH  = 6371.0       # km
+
+
+def risk_level_from_miss_distance(miss_distance_km: float) -> str:
+    """Classify a screening result using explicit miss-distance thresholds."""
+    if miss_distance_km < 1.0:
+        return "HIGH"
+    if miss_distance_km < 5.0:
+        return "MEDIUM"
+    return "LOW"
 
 
 def _altitude_from_tle_line2(line2: str) -> Optional[float]:
@@ -100,39 +110,53 @@ class SatellitePredictor:
 
         # --- Model ---
         if not self.model_path.exists():
-            log.warning(f"Model file not found: {self.model_path}. Using untrained model.")
-            self.model = build_model()
-        else:
-            checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
-            # Support both old ("config") and new ("model_cfg") checkpoint formats
-            config = checkpoint.get("config", None)
-            if config is None and "model_cfg" in checkpoint:
-                config = {"model": checkpoint["model_cfg"]}
-            self.model = build_model(config)
-            self.model.load_state_dict(checkpoint["model_state_dict"])
-            log.info(f"  Loaded model from epoch {checkpoint.get('epoch', '?')}")
+            raise FileNotFoundError(f"Model file not found: {self.model_path}")
+
+        checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=False)
+        # Support both old ("config") and new ("model_cfg") checkpoint formats
+        config = checkpoint.get("config", None)
+        if config is None and "model_cfg" in checkpoint:
+            config = {"model": checkpoint["model_cfg"]}
+        self.model = build_model(config)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        log.info(f"  Loaded model from epoch {checkpoint.get('epoch', '?')}")
 
         self.model = self.model.to(self.device)
         self.model.eval()
 
         # --- Catalog ---
         if not self.catalog_path.exists():
-            log.warning(f"Catalog not found: {self.catalog_path}. Using empty catalog.")
-            self.catalog = pd.DataFrame(columns=["norad_id", "name", "line1", "line2"])
-        else:
-            self.catalog = pd.read_csv(self.catalog_path)
-            log.info(f"  Loaded catalog: {len(self.catalog):,} objects")
+            raise FileNotFoundError(f"Catalog not found: {self.catalog_path}")
+
+        self.catalog = pd.read_csv(self.catalog_path)
+        required_columns = {"norad_id", "name", "line1", "line2", "source"}
+        missing_columns = required_columns.difference(self.catalog.columns)
+        if missing_columns:
+            raise ValueError(f"Catalog is missing required columns: {sorted(missing_columns)}")
+        if self.catalog.empty:
+            raise ValueError("Catalog is empty")
+        log.info(f"  Loaded catalog: {len(self.catalog):,} objects")
 
         # Build lookup indices
         self.name_to_idx  = {str(r["name"]).upper(): i for i, r in self.catalog.iterrows()}
         self.norad_to_idx = {int(r["norad_id"]): i for i, r in self.catalog.iterrows()}
 
         # --- Normalization ---
-        if norm_path and Path(norm_path).exists():
-            npz = np.load(norm_path, allow_pickle=True)
-            self.means = npz["means"].astype(np.float32)
-            self.stds  = npz["stds"].astype(np.float32)
-            log.info(f"  Loaded normalization from {norm_path}")
+        if not norm_path or not Path(norm_path).exists():
+            raise FileNotFoundError(f"Normalization file not found: {norm_path}")
+
+        npz = np.load(norm_path, allow_pickle=True)
+        self.means = npz["means"].astype(np.float32)
+        self.stds  = npz["stds"].astype(np.float32)
+        expected_shape = (len(self.feature_names),)
+        if self.means.shape != expected_shape or self.stds.shape != expected_shape:
+            raise ValueError(
+                "Normalization dimensions do not match runtime features: "
+                f"means={self.means.shape}, stds={self.stds.shape}, expected={expected_shape}"
+            )
+        if not np.isfinite(self.means).all() or not np.isfinite(self.stds).all() or (self.stds <= 0).any():
+            raise ValueError("Normalization parameters contain invalid values")
+        log.info(f"  Loaded normalization from {norm_path}")
 
         # Ensemble checkpoints for interpretability
         models_dir = self.model_path.parent
@@ -162,6 +186,18 @@ class SatellitePredictor:
             return None
 
         return self.catalog.iloc[idx] if idx is not None else None
+
+    def _select_debris_candidates(self, primary_norad_id: int) -> pd.DataFrame:
+        """Return rows explicitly sourced from tracked debris groups.
+
+        The active catalog contains docked and co-orbiting spacecraft such as
+        ISS modules. Treating those objects as debris creates zero-distance
+        false alarms, so production screening uses debris sources only.
+        """
+        sources = self.catalog["source"].astype(str).str.lower()
+        mask = sources.isin(DEBRIS_SOURCES)
+        mask &= self.catalog["norad_id"].astype(int) != int(primary_norad_id)
+        return self.catalog.loc[mask].copy()
 
     def _propagate_pair(
         self,
@@ -201,7 +237,7 @@ class SatellitePredictor:
         """
         Compute features for all valid satellite-debris pairs.
         Returns:
-            X:           [M, 30] feature matrix (normalized)
+            X:           [M, 32] feature matrix (normalized)
             X_traj:      [M, T, 22] trajectory tensors for transformer
             pair_info:   list of dicts with metadata per pair
         """
@@ -250,6 +286,7 @@ class SatellitePredictor:
             pair_info.append({
                 "debris_name":    str(debris_row["name"]),
                 "debris_norad_id": int(debris_row["norad_id"]),
+                "debris_source": str(debris_row.get("source", "unknown")),
                 "min_distance_km": round(min_dist, 3),
                 "tca_timestamp":   tca_ts,
                 "tca_utc":         datetime.fromtimestamp(tca_ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -261,7 +298,7 @@ class SatellitePredictor:
         if not feature_rows:
             return np.empty((0, n_feat)), np.empty((0, T, n_model_feat)), []
 
-        X = np.stack(feature_rows, axis=0).astype(np.float32)  # [M, 30]
+        X = np.stack(feature_rows, axis=0).astype(np.float32)  # [M, 32]
         X_norm = (X - self.means) / self.stds                  # normalize
 
         # Build trajectory tensors [M, T, 22] by tiling static features
@@ -324,7 +361,9 @@ class SatellitePredictor:
         t_prop_start = time.time()
         sat_alt = _altitude_from_tle_line2(str(sat_row["line2"]))
         alt_margin = 200  # km — only consider objects within ±200km altitude
-        debris_rows = self.catalog[self.catalog["norad_id"] != int(sat_row["norad_id"])]
+        debris_rows = self._select_debris_candidates(int(sat_row["norad_id"]))
+        if debris_rows.empty:
+            return {"error": "No debris objects are available. Refresh the TLE catalog."}
 
         if sat_alt is not None:
             debris_alts = debris_rows["line2"].apply(lambda l2: _altitude_from_tle_line2(str(l2)))
@@ -349,11 +388,15 @@ class SatellitePredictor:
         log.info(f"Found {n_pairs:,} candidate pairs (propagation: {t_prop:.1f}s)")
 
         if n_pairs == 0:
+            elapsed = time.time() - start_time
             return {
                 "satellite": self._format_satellite(sat_row),
                 "threats": [],
                 "n_candidates_analyzed": 0,
-                "inference_time_s": round(time.time() - start_time, 2),
+                "propagation_time_s": round(t_prop, 2),
+                "inference_time_s": 0.0,
+                "total_time_s": round(elapsed, 2),
+                "ranking_basis": "minimum propagated miss distance",
                 "message": "No close approaches found within 500km.",
             }
 
@@ -363,19 +406,15 @@ class SatellitePredictor:
         t_infer = time.time() - t_infer_start
 
         # --- Rank and format results ---
-        # Hybrid scoring: blend model confidence with physics-based miss distance.
-        # Physics thresholds (same as training labels):
+        # Operational ranking is physics-based. Model probabilities remain in
+        # the response as advisory diagnostics, but they do not determine the
+        # displayed collision probability or risk label.
+        # Physics screening thresholds:
         #   HIGH:   miss distance < 1.0 km
         #   MEDIUM: miss distance < 5.0 km
         #   LOW:    miss distance >= 5.0 km
-        high_probs = probs[:, 2]
-        med_probs  = probs[:, 1]
-
         distances = np.array([p["min_distance_km"] for p in pair_info])
-        dist_norm = np.clip(distances / 10.0, 0, 1)  # normalize to [0, 1]
-        scores = high_probs * 0.3 + med_probs * 0.2 + (1 - dist_norm) * 0.5
-
-        ranked_idx = np.argsort(scores)[::-1][:top_n]
+        ranked_idx = np.argsort(distances)[:top_n]
 
         threats = []
         for i, idx in enumerate(ranked_idx):
@@ -383,20 +422,16 @@ class SatellitePredictor:
             p = probs[idx]
             miss_km = info["min_distance_km"]
 
-            # Hybrid risk label: physics-based from miss distance
-            if miss_km < 1.0:
-                risk_label = "HIGH"
-            elif miss_km < 5.0:
-                risk_label = "MEDIUM"
-            else:
-                risk_label = "LOW"
+            # Risk label is physics-based from propagated miss distance.
+            risk_label = risk_level_from_miss_distance(miss_km)
 
-            collision_prob = max(float(p[2] * 0.1), info["physics_probability"])  # blend both estimates
+            collision_prob = float(info["physics_probability"])
 
             threats.append({
                 "rank": i + 1,
                 "debris_name": info["debris_name"],
                 "debris_norad_id": info["debris_norad_id"],
+                "debris_source": info["debris_source"],
                 "collision_probability": round(collision_prob * 100, 6),  # as %
                 "collision_probability_pct": f"{collision_prob * 100:.4f}%",
                 "uncertainty_pct": round(float(uncertainty[idx]) * 100, 3),
@@ -421,6 +456,7 @@ class SatellitePredictor:
             "propagation_time_s": round(t_prop, 2),
             "inference_time_s": round(t_infer, 2),
             "total_time_s": round(elapsed, 2),
+            "ranking_basis": "minimum propagated miss distance",
         }
 
     def _format_satellite(self, row: pd.Series) -> dict:
@@ -448,8 +484,6 @@ class SatellitePredictor:
             return base
 
         sat_row = self.find_satellite(satellite_name, norad_id)
-        debris_rows = self.catalog[self.catalog["norad_id"] != int(sat_row["norad_id"])]
-
         epoch = datetime.now(tz=timezone.utc).replace(minute=0, second=0, microsecond=0)
         from backend.utils.sgp4_propagator import get_propagation_times
         _, times_jd = get_propagation_times(epoch, 168)
@@ -675,12 +709,22 @@ class SatellitePredictor:
             "ensemble": ensemble,
         }
 
-    def list_satellites(self, limit: int = 1000, search: str = None, include_tle: bool = False) -> list[dict]:
+    def list_satellites(
+        self,
+        limit: int = 1000,
+        search: str = None,
+        include_tle: bool = False,
+        kind: str | None = None,
+    ) -> list[dict]:
         """Return a list of all trackable satellites."""
         df = self.catalog
         if search:
             mask = df["name"].str.upper().str.contains(search.upper(), na=False)
             df = df[mask]
+        if kind == "active":
+            df = df[df["source"] == "active"]
+        elif kind == "debris":
+            df = df[df["source"] != "active"]
         df = df.head(limit)
         
         results = []

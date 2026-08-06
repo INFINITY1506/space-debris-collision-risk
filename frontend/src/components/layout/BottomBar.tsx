@@ -9,7 +9,7 @@ export function BottomBar() {
     }, []);
 
     return (
-        <div className="overlay-bottom glass" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', fontSize: '.62rem' }}>
+        <div className="overlay-bottom glass bottom-bar">
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--r-low)' }} />
@@ -20,8 +20,8 @@ export function BottomBar() {
                     <span className="font-mono" style={{ color: 'var(--t3)' }}>Debris</span>
                 </div>
             </div>
-            <span style={{ color: 'var(--t4)' }}>Debris Sentinel v1.0 &middot; Transformer Model &middot; Research Use Only</span>
-            <span className="font-mono" style={{ color: 'var(--t4)', letterSpacing: '.05em' }}>{utc} UTC</span>
+            <span className="bottom-bar-summary">Debris Sentinel v1.0 &middot; Physics-ranked screening &middot; Research Use Only</span>
+            <span className="font-mono bottom-bar-clock" style={{ color: 'var(--t4)', letterSpacing: '.05em' }}>{utc} UTC</span>
         </div>
     );
 }

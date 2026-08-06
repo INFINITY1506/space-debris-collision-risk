@@ -18,6 +18,7 @@ interface SatelliteObj {
 }
 
 const MAX_ALT_KM = 2200;
+const CATALOG_RETRY_DELAYS_MS = [0, 1000, 2000, 3000, 5000, 5000];
 
 function satColor(source: string): string {
     return source === 'active' ? 'rgba(34, 211, 106, 0.85)' : 'rgba(248, 82, 82, 0.7)';
@@ -34,6 +35,8 @@ export function GlobeView({ onSelectSatellite, selectedSatName }: GlobeViewProps
     const [dimensions, setDimensions] = useState({ width: window.innerWidth, height: window.innerHeight });
     const [hovered, setHovered] = useState<SatelliteObj | null>(null);
     const [selectedId, setSelectedId] = useState<number | null>(null);
+    const [catalogState, setCatalogState] = useState<'loading' | 'ready' | 'error'>('loading');
+    const [catalogReload, setCatalogReload] = useState(0);
 
     // Window resize
     useEffect(() => {
@@ -44,13 +47,37 @@ export function GlobeView({ onSelectSatellite, selectedSatName }: GlobeViewProps
 
     // Load satellite data
     useEffect(() => {
-        listSatellites('', 2000, true)
-            .then(data => setSatellites(data.filter(s => s.line1 && s.line2)))
-            .catch(() => {});
+        let cancelled = false;
+
+        const loadCatalog = async () => {
+            setCatalogState('loading');
+            for (const delayMs of CATALOG_RETRY_DELAYS_MS) {
+                if (delayMs) await new Promise(resolve => window.setTimeout(resolve, delayMs));
+                if (cancelled) return;
+                try {
+                    const [active, debris] = await Promise.all([
+                        listSatellites('', 1400, true, 'active'),
+                        listSatellites('', 600, true, 'debris'),
+                    ]);
+                    if (cancelled) return;
+                    setSatellites([...active, ...debris].filter(s => s.line1 && s.line2));
+                    setCatalogState('ready');
+                    return;
+                } catch {
+                    // Cloud Run may return 503 while a scaled-to-zero instance loads the model.
+                }
+            }
+            if (!cancelled) setCatalogState('error');
+        };
+
+        void loadCatalog();
 
         const timer = setInterval(() => setTime(new Date()), 5000);
-        return () => clearInterval(timer);
-    }, []);
+        return () => {
+            cancelled = true;
+            clearInterval(timer);
+        };
+    }, [catalogReload]);
 
     // Globe controls
     useEffect(() => {
@@ -157,7 +184,7 @@ export function GlobeView({ onSelectSatellite, selectedSatName }: GlobeViewProps
                 backgroundColor="rgba(0,0,5,1)"
                 globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
                 bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
-                atmosphereColor="rgba(80,120,220,0.35)"
+                atmosphereColor="#5078DC"
                 atmosphereAltitude={0.18}
                 animateIn={true}
 
@@ -230,6 +257,12 @@ export function GlobeView({ onSelectSatellite, selectedSatName }: GlobeViewProps
                     <span className="globe-info-dot globe-info-dot--debris"></span>
                     <span>{objectsData.filter(s => s.source !== 'active').length.toLocaleString()} debris</span>
                 </div>
+                {catalogState === 'loading' && <div className="globe-info-status">Loading orbital catalog…</div>}
+                {catalogState === 'error' && (
+                    <button className="globe-retry" onClick={() => setCatalogReload(value => value + 1)}>
+                        Catalog unavailable · Retry
+                    </button>
+                )}
             </div>
 
             {/* Instruction hint */}

@@ -1,7 +1,7 @@
 """
 transformer.py
 --------------
-150M-parameter transformer model for space debris collision risk prediction.
+Configurable transformer model for space debris collision risk prediction.
 
 Architecture:
   - Input embedding: Linear(22, 1024)
@@ -139,7 +139,7 @@ class EvidentialOutputHead(nn.Module):
 
 class CollisionRiskTransformer(nn.Module):
     """
-    150M-parameter transformer for space debris collision risk prediction.
+    Transformer for space debris collision risk prediction.
 
     Input:  [batch, 168, 22]   (trajectory sequence)
     Output: (evidence, alpha, uncertainty, prob)
