@@ -216,11 +216,13 @@ export async function predictCollision(
 export async function listSatellites(
     search?: string,
     limit: number = 200,
-    includeTle: boolean = false
+    includeTle: boolean = false,
+    kind?: 'active' | 'debris'
 ): Promise<SatelliteListItem[]> {
     const params = new URLSearchParams({ limit: String(limit) });
     if (search) params.set('search', search);
     if (includeTle) params.set('include_tle', 'true');
+    if (kind) params.set('kind', kind);
 
     const res = await fetch(`${API_BASE_URL}/satellites?${params}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

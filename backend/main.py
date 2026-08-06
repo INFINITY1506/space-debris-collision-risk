@@ -19,7 +19,7 @@ import time
 import logging
 import numpy as np
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -161,6 +161,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +480,10 @@ async def list_satellites(
     search: Optional[str] = Query(default=None, max_length=100, description="Filter by name"),
     limit:  int           = Query(default=100, ge=1, le=5000, description="Max results"),
     include_tle: bool     = Query(default=False, description="Include TLE data"),
+    kind: Optional[Literal["active", "debris"]] = Query(
+        default=None,
+        description="Limit results to active spacecraft or debris/inactive objects",
+    ),
 ):
     """
     List all trackable satellites in the catalog.
@@ -477,7 +492,12 @@ async def list_satellites(
     if not predictor:
         raise HTTPException(status_code=503, detail="Catalog not loaded")
 
-    satellites = predictor.list_satellites(limit=limit, search=search, include_tle=include_tle)
+    satellites = predictor.list_satellites(
+        limit=limit,
+        search=search,
+        include_tle=include_tle,
+        kind=kind,
+    )
     return satellites
 
 
@@ -531,7 +551,12 @@ async def generic_exception_handler(request: Request, exc: Exception):
 _FRONTEND_DIST = _ROOT / "frontend" / "dist"
 if _FRONTEND_DIST.exists():
     from fastapi.staticfiles import StaticFiles
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, Response
+
+    @app.head("/", include_in_schema=False)
+    async def head_frontend():
+        """Allow uptime checks and link validators to probe the homepage."""
+        return Response(status_code=200, media_type="text/html")
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):

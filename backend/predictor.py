@@ -709,12 +709,22 @@ class SatellitePredictor:
             "ensemble": ensemble,
         }
 
-    def list_satellites(self, limit: int = 1000, search: str = None, include_tle: bool = False) -> list[dict]:
+    def list_satellites(
+        self,
+        limit: int = 1000,
+        search: str = None,
+        include_tle: bool = False,
+        kind: str | None = None,
+    ) -> list[dict]:
         """Return a list of all trackable satellites."""
         df = self.catalog
         if search:
             mask = df["name"].str.upper().str.contains(search.upper(), na=False)
             df = df[mask]
+        if kind == "active":
+            df = df[df["source"] == "active"]
+        elif kind == "debris":
+            df = df[df["source"] != "active"]
         df = df.head(limit)
         
         results = []

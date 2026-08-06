@@ -1,16 +1,18 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import './index.css';
 import { SearchBar } from './components/SearchBar';
 import { ResultsTable } from './components/ResultsTable';
 import { SatelliteCard } from './components/SatelliteCard';
-import { GlobeView } from './components/GlobeView';
 import { LoadingSpinner, ErrorMessage, StatCard, RiskSummaryBar } from './components/LoadingSpinner';
 import { predictCollision, predictDetailed, getHealth, type PredictResponse, type DetailedPredictResponse, type HealthResponse } from './api/client';
-import { AnalyticsDashboard } from './components/AnalyticsDashboard';
 import { TopBar } from './components/layout/TopBar';
 import { BottomBar } from './components/layout/BottomBar';
 import { Sidebar } from './components/layout/Sidebar';
 import { RightPanel } from './components/layout/RightPanel';
+import { AboutPanel } from './components/AboutPanel';
+
+const GlobeView = lazy(() => import('./components/GlobeView').then(module => ({ default: module.GlobeView })));
+const AnalyticsDashboard = lazy(() => import('./components/AnalyticsDashboard').then(module => ({ default: module.AnalyticsDashboard })));
 
 export default function App() {
     const [result, setResult] = useState<PredictResponse | null>(null);
@@ -22,6 +24,7 @@ export default function App() {
     const [detailedLoading, setDetailedLoading] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [rightPanelOpen, setRightPanelOpen] = useState(false);
+    const [aboutOpen, setAboutOpen] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -44,6 +47,7 @@ export default function App() {
             const data = await predictCollision(noradId ? undefined : name, noradId, 10);
             setResult(data);
             setRightPanelOpen(true);
+            if (window.innerWidth < 900) setSidebarCollapsed(true);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An unexpected error occurred');
         } finally { setLoading(false); }
@@ -69,7 +73,9 @@ export default function App() {
     return (
         <>
             {/* Full-screen globe background */}
-            <GlobeView onSelectSatellite={handleSearch} selectedSatName={result?.satellite?.name} />
+            <Suspense fallback={<div className="globe-loading">Loading interactive globe…</div>}>
+                <GlobeView onSelectSatellite={handleSearch} selectedSatName={result?.satellite?.name} />
+            </Suspense>
 
             {/* Top bar */}
             <TopBar
@@ -77,6 +83,7 @@ export default function App() {
                 health={health}
                 sidebarCollapsed={sidebarCollapsed}
                 onToggleSidebar={() => setSidebarCollapsed(c => !c)}
+                onOpenAbout={() => setAboutOpen(true)}
             />
 
             {/* Left sidebar — search & satellite info */}
@@ -156,13 +163,19 @@ export default function App() {
                             </button>
                         )}
 
-                        {detailed && <AnalyticsDashboard detailed={detailed} />}
+                        {detailed && (
+                            <Suspense fallback={<LoadingSpinner message="Loading analytics…" />}>
+                                <AnalyticsDashboard detailed={detailed} />
+                            </Suspense>
+                        )}
                     </>
                 )}
             </RightPanel>
 
             {/* Bottom bar */}
             <BottomBar />
+
+            <AboutPanel open={aboutOpen} onClose={() => setAboutOpen(false)} />
 
             {/* Loading overlay */}
             {loading && (
