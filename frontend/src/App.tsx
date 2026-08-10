@@ -75,7 +75,7 @@ export default function App() {
         } finally { setDetailedLoading(false); }
     };
 
-    const online = !!health?.model_loaded;
+    const online = health?.screening_available ?? !!health?.model_loaded;
     const topPct = result?.threats?.[0]?.collision_probability ?? 0;
     const highN = result?.threats?.filter(t => t.risk_level === 'HIGH').length ?? 0;
     const medN  = result?.threats?.filter(t => t.risk_level === 'MEDIUM').length ?? 0;

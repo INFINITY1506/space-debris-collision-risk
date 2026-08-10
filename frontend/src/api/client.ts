@@ -64,6 +64,8 @@ export interface HealthResponse {
     timestamp: string;
     device: string;
     catalog_age_hours?: number | null;
+    catalog_state?: 'fresh' | 'aging' | 'stale' | 'unavailable';
+    screening_available?: boolean;
     detail?: string | null;
 }
 
@@ -270,7 +272,10 @@ export async function waitForServiceReady(
     while (Date.now() < deadline) {
         try {
             const health = await getHealth();
-            if (health.model_loaded) return health;
+            if (health.screening_available ?? health.model_loaded) return health;
+            if (health.model_loaded && health.catalog_state === 'stale') {
+                throw new Error(health.detail || 'Collision screening is paused until the catalog refreshes.');
+            }
             if (health.status === 'error') {
                 throw new Error(health.detail || 'Service startup failed. Please try again later.');
             }

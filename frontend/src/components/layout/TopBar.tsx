@@ -17,14 +17,20 @@ export function TopBar({ online, health, sidebarCollapsed, onToggleSidebar, onOp
         return () => clearInterval(t);
     }, []);
 
-    const warming = !online && health != null && health.status !== 'error';
-    const statusColor = online ? 'var(--r-low)' : warming ? 'var(--r-med)' : 'var(--r-high)';
-    const statusBackground = online
+    const catalogAging = online && health?.catalog_state === 'aging';
+    const screeningPaused = !!health?.model_loaded && !online;
+    const warming = !online && !screeningPaused && health != null && health.status !== 'error';
+    const caution = catalogAging || warming;
+    const statusColor = online && !catalogAging ? 'var(--r-low)' : caution ? 'var(--r-med)' : 'var(--r-high)';
+    const statusBackground = online && !catalogAging
         ? 'rgba(34,197,94,.08)'
-        : warming ? 'rgba(245,158,11,.08)' : 'rgba(239,68,68,.08)';
-    const statusBorder = online
+        : caution ? 'rgba(245,158,11,.08)' : 'rgba(239,68,68,.08)';
+    const statusBorder = online && !catalogAging
         ? 'rgba(34,197,94,.2)'
-        : warming ? 'rgba(245,158,11,.2)' : 'rgba(239,68,68,.2)';
+        : caution ? 'rgba(245,158,11,.2)' : 'rgba(239,68,68,.2)';
+    const statusLabel = screeningPaused
+        ? 'screening paused'
+        : catalogAging ? 'catalog aging' : online ? 'ready' : warming ? 'warming' : 'unavailable';
 
     return (
         <div className="overlay-top glass topbar">
@@ -46,11 +52,11 @@ export function TopBar({ online, health, sidebarCollapsed, onToggleSidebar, onOp
                 </div>
             </div>
             <div className="topbar-meta">
-                <div className="system-status" style={{ background: statusBackground, border: `1px solid ${statusBorder}` }}>
+                <div className="system-status" title={health?.detail ?? undefined} style={{ background: statusBackground, border: `1px solid ${statusBorder}` }}>
                     <div style={{ width: 6, height: 6, borderRadius: '50%', background: statusColor }} />
                     <span className="status-label">
                         <span className="status-label-prefix">System </span>
-                        {online ? 'ready' : warming ? 'warming' : 'unavailable'}
+                        {statusLabel}
                     </span>
                 </div>
                 {health && <span className="font-mono topbar-object-count">CAT {health.catalog_size.toLocaleString()}</span>}

@@ -41,7 +41,7 @@ TLE_SOURCES = [
 HEADERS = {"User-Agent": "SpaceDebrisPredictor/1.0 (research project)"}
 
 
-def download_tle(name: str, url: str, retries: int = 3, use_cache: bool = False) -> str | None:
+def download_tle(name: str, url: str, retries: int = 1, use_cache: bool = False) -> str | None:
     """Download TLE data from a URL and save to data/raw/<name>.tle."""
     out_path = RAW_DIR / f"{name}.tle"
     if use_cache and out_path.exists():
@@ -51,7 +51,8 @@ def download_tle(name: str, url: str, retries: int = 3, use_cache: bool = False)
     for attempt in range(1, retries + 1):
         try:
             log.info(f"[{attempt}/{retries}] Downloading {name} TLEs from {url}")
-            resp = requests.get(url, headers=HEADERS, timeout=30)
+            timeout = 120 if name in {"active", "starlink"} else 60
+            resp = requests.get(url, headers=HEADERS, timeout=timeout)
             resp.raise_for_status()
             text = resp.text.strip()
             if len(text) < 100 or "\n1 " not in f"\n{text}" or "\n2 " not in f"\n{text}":
@@ -60,11 +61,40 @@ def download_tle(name: str, url: str, retries: int = 3, use_cache: bool = False)
             out_path.write_text(text)
             log.info(f"Saved {name}.tle ({len(text) // 1024} KB, {text.count(chr(10))} lines)")
             return text
+        except requests.HTTPError as e:
+            response_text = e.response.text if e.response is not None else ""
+            if (
+                e.response is not None
+                and e.response.status_code == 403
+                and "has not updated since your last successful" in response_text
+                and out_path.exists()
+            ):
+                log.info("%s data is unchanged; reusing the last validated source snapshot", name)
+                return out_path.read_text()
+            log.error(f"Attempt {attempt} failed for {name}: {e}")
+            if attempt < retries:
+                time.sleep(2 ** attempt)
         except Exception as e:
             log.error(f"Attempt {attempt} failed for {name}: {e}")
             if attempt < retries:
                 time.sleep(2 ** attempt)
+    if out_path.exists():
+        log.warning("Download failed for %s; reusing the last validated source snapshot", name)
+        return out_path.read_text()
     return None
+
+
+def seed_tle_cache_from_catalog(catalog_path: str | Path) -> None:
+    """Reconstruct per-source TLE caches from a validated catalog snapshot."""
+    frame = pd.read_csv(catalog_path, usecols=["name", "line1", "line2", "source"])
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    source_names = {name for name, _ in TLE_SOURCES}
+    for source, rows in frame.groupby("source"):
+        if source not in source_names or rows.empty:
+            continue
+        blocks = [f"{row.name}\n{row.line1}\n{row.line2}" for row in rows.itertuples(index=False)]
+        (RAW_DIR / f"{source}.tle").write_text("\n".join(blocks) + "\n")
+        log.info("Seeded %s cached objects for %s", f"{len(rows):,}", source)
 
 
 def parse_tle_block(text: str, source: str) -> list[dict]:

@@ -10,7 +10,8 @@ Debris Sentinel is a research-grade web application for screening close approach
 
 ## What it does
 
-- Refreshes public active-satellite and debris-group TLEs from CelesTrak at startup.
+- Loads a validated, versioned TLE snapshot from private Cloud Storage at startup.
+- Refreshes CelesTrak data in a separate daily Cloud Run Job so upstream failures cannot break web cold starts.
 - Propagates candidate debris over a seven-day horizon with SGP4.
 - Excludes active spacecraft and co-orbiting modules from the debris threat list.
 - Ranks results by minimum propagated miss distance.
@@ -27,7 +28,7 @@ Debris Sentinel is a research-grade web application for screening close approach
 | Machine learning | PyTorch transformer diagnostics with uncertainty views |
 | Product interface | Responsive React dashboard with an interactive Three.js globe |
 | Backend | Typed FastAPI endpoints, validation, health checks, and rate limiting |
-| Reliability | Cold-start retries, catalog freshness enforcement, regression tests, and CI |
+| Reliability | Last-known-good catalog snapshots, scheduled refresh isolation, freshness enforcement, regression tests, and CI |
 | Delivery | Multi-stage Docker image, Google Cloud Run, custom domain, and managed HTTPS |
 
 The bundled checkpoint is approximately 5 million parameters (6 encoder layers, 8 heads, 256-dimensional embedding). Its reported validation metrics came from threshold-derived training data and should not be interpreted as operational collision-prediction performance.
@@ -35,19 +36,20 @@ The bundled checkpoint is approximately 5 million parameters (6 encoder layers, 
 ## Architecture
 
 ```text
-CelesTrak TLE snapshot
-        |
-  debris-only filtering
-        |
-SGP4 propagation (7 days, hourly)
-        |
-32-element conjunction feature vector
-        |
-miss-distance ranking + screening probability
-        |
-advisory transformer diagnostics
-        |
-FastAPI + React interface
+Cloud Scheduler -> refresh Cloud Run Job -> CelesTrak
+                         | validate
+                         v
+              versioned Cloud Storage snapshot
+                         |
+                  Cloud Run service
+                         |
+       SGP4 propagation (7 days, hourly)
+                         |
+      miss-distance ranking + screening probability
+                         |
+       advisory transformer diagnostics
+                         |
+              FastAPI + React interface
 ```
 
 ## Local setup
@@ -100,7 +102,7 @@ curl -X POST http://localhost:8000/api/predict \
 
 ## Cloud Run deployment
 
-The production container is sized for a small public portfolio deployment:
+The deployment script provisions the web service, a private versioned catalog bucket, least-privilege service accounts, a catalog refresh Cloud Run Job, and a daily Cloud Scheduler trigger. The production container is sized for a small public portfolio deployment:
 
 - 1 vCPU and 2 GiB memory
 - request-based billing with scale-to-zero
@@ -119,10 +121,12 @@ See [docs/DEPLOY_CLOUD_RUN.md](docs/DEPLOY_CLOUD_RUN.md) for billing, domain map
 
 ## Data and model files
 
-- `data/raw/catalog.csv` is a deployable snapshot and is refreshed when it is more than 48 hours old.
+- `data/raw/catalog.csv` is the bundled emergency snapshot. Production prefers `gs://.../catalog/current.csv`.
+- The scheduled job publishes only catalogs with the required schema, source groups, unique NORAD IDs, and minimum row count.
+- Catalogs older than 48 hours are reported as aging. Screening pauses at 168 hours, while the portfolio and catalog browser remain available.
 - `best_model.pth` and `normalization.npz` are downloaded from the public Hugging Face repository during the container build.
 - Set `DOWNLOAD_ENSEMBLE=true` during a custom build only if the optional checkpoints are needed.
-- Startup fails closed if the checkpoint, normalization file, catalog, or required debris sources are unavailable or invalid.
+- Startup retains the bundled known-good snapshot if Cloud Storage is temporarily unavailable; unsafe screening still fails closed at the hard freshness limit.
 
 ## Known limitations
 

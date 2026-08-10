@@ -25,9 +25,19 @@ chmod +x scripts/deploy_cloud_run.sh
 ./scripts/deploy_cloud_run.sh YOUR_PROJECT_ID
 ```
 
-The script enables Cloud Run, Cloud Build, and Artifact Registry, builds the Dockerfile from source, deploys one public service, and checks `/health`.
+The script enables Cloud Run, Cloud Build, Artifact Registry, Cloud Storage, and Cloud Scheduler. It then:
 
-The cost guardrails are scale-to-zero, concurrency 1, and a maximum of one instance. A cold start refreshes stale CelesTrak data and loads the checkpoint before `/health` returns `200`.
+1. Creates a private, versioned catalog bucket with a lifecycle rule for older versions.
+2. Creates separate least-privilege identities for the web service, refresh job, and scheduler.
+3. Seeds the bucket only when no known-good snapshot exists.
+4. Builds and deploys the public web service.
+5. Deploys a private catalog refresh Cloud Run Job from the same immutable image.
+6. Schedules the refresh daily at 02:15 UTC.
+7. Checks `/health` after the new revision becomes ready.
+
+The cost guardrails are scale-to-zero, concurrency 1, and a maximum of one web instance. A cold start downloads only the last validated Cloud Storage snapshot and loads the checkpoint; it never depends directly on CelesTrak.
+
+The refresh job validates downloads before publishing. A failed or unchanged upstream response leaves the previous object generation untouched. CelesTrak's documented HTTP 403 "data has not updated" response is treated as unchanged data, not retried aggressively.
 
 ## Verify production
 
@@ -43,7 +53,20 @@ curl -X POST "$SERVICE_URL/api/predict" \
   -d '{"norad_id":25544,"top_n":3}'
 ```
 
-Confirm that health is `ok`, the catalog is recent, the homepage loads, and the result says its ranking basis is `minimum propagated miss distance`.
+Confirm that `screening_available` is `true`, the catalog is recent, the homepage loads, and the result says its ranking basis is `minimum propagated miss distance`. A health status of `degraded` means the catalog is older than the 48-hour target but still inside the 168-hour screening limit.
+
+Inspect or run the refresh job manually:
+
+```bash
+gcloud run jobs execute debris-catalog-refresh \
+  --project YOUR_PROJECT_ID \
+  --region asia-southeast1 \
+  --wait
+
+gcloud scheduler jobs describe debris-catalog-daily \
+  --project YOUR_PROJECT_ID \
+  --location asia-southeast1
+```
 
 ## Connect debrissentinel.com
 
@@ -104,4 +127,4 @@ gcloud run services update-traffic debris-sentinel \
 
 ## Cost notes
 
-Cloud Run's monthly free tier continues after the 90-day trial as long as billing remains enabled. With the configured scale-to-zero service, light portfolio traffic should often stay in the free tier. Artifact Registry storage and outbound data can still generate small charges. The one-instance maximum limits simultaneous compute but is not a hard currency spending cap, so keep a billing budget alert enabled.
+Cloud Run's monthly free tier continues after the 90-day trial as long as billing remains enabled. With the configured scale-to-zero service, light portfolio traffic should often stay in the free tier. Artifact Registry, Cloud Storage, Cloud Scheduler, job execution, and outbound data can still generate small charges. The one-instance maximum limits simultaneous compute but is not a hard currency spending cap, so keep a billing budget alert enabled.

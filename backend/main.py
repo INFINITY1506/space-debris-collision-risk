@@ -48,7 +48,7 @@ from pydantic import BaseModel, field_validator
 # Import predictor
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from backend.predictor import SatellitePredictor
-from backend.catalog import ensure_catalog_fresh
+from backend.catalog import download_catalog_snapshot, ensure_catalog_fresh
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -62,8 +62,11 @@ CATALOG_PATH = Path(os.getenv("CATALOG_PATH", str(_ROOT / "data/raw/catalog.csv"
 NORM_PATH    = Path(os.getenv("NORM_PATH",    str(_ROOT / "data/processed/normalization.npz")))
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 CATALOG_MAX_AGE_HOURS = float(os.getenv("CATALOG_MAX_AGE_HOURS", "48"))
-REFRESH_TLE_ON_STARTUP = os.getenv("REFRESH_TLE_ON_STARTUP", "true").lower() in {"1", "true", "yes"}
-ALLOW_STALE_CATALOG = os.getenv("ALLOW_STALE_CATALOG", "false").lower() in {"1", "true", "yes"}
+CATALOG_HARD_MAX_AGE_HOURS = float(os.getenv("CATALOG_HARD_MAX_AGE_HOURS", "168"))
+CATALOG_SNAPSHOT_URI = os.getenv("CATALOG_SNAPSHOT_URI", "").strip()
+SYNC_CATALOG_SNAPSHOT_ON_STARTUP = os.getenv("SYNC_CATALOG_SNAPSHOT_ON_STARTUP", "true").lower() in {"1", "true", "yes"}
+REFRESH_TLE_ON_STARTUP = os.getenv("REFRESH_TLE_ON_STARTUP", "false").lower() in {"1", "true", "yes"}
+ALLOW_STALE_CATALOG = os.getenv("ALLOW_STALE_CATALOG", "true").lower() in {"1", "true", "yes"}
 
 # ---------------------------------------------------------------------------
 # Global predictor instance (shared across requests)
@@ -72,6 +75,7 @@ predictor: Optional[SatellitePredictor] = None
 predictor_state = "not_started"
 predictor_error: Optional[str] = None
 loaded_catalog_age_hours: Optional[float] = None
+catalog_screening_available = False
 
 
 def _predictor_unavailable_detail() -> str:
@@ -79,6 +83,47 @@ def _predictor_unavailable_detail() -> str:
     if predictor_state == "error":
         return "Service startup failed. Please try again later."
     return "Service is warming up while the orbital catalog and model load. Please retry shortly."
+
+
+def _catalog_state(age_hours: Optional[float]) -> str:
+    if age_hours is None:
+        return "unavailable"
+    if age_hours <= CATALOG_MAX_AGE_HOURS:
+        return "fresh"
+    if age_hours <= CATALOG_HARD_MAX_AGE_HOURS:
+        return "aging"
+    return "stale"
+
+
+def _catalog_detail(age_hours: Optional[float]) -> Optional[str]:
+    state = _catalog_state(age_hours)
+    if state == "aging":
+        return (
+            f"Catalog refresh is delayed ({age_hours:.1f} hours old); screening remains "
+            f"available within the {CATALOG_HARD_MAX_AGE_HOURS:.0f}-hour safety window."
+        )
+    if state == "stale":
+        return (
+            f"Collision screening is paused because the catalog is {age_hours:.1f} hours old. "
+            "The scheduled refresh must publish a newer validated snapshot."
+        )
+    return None
+
+
+def _require_screening_predictor() -> SatellitePredictor:
+    if not predictor or not predictor.loaded:
+        raise HTTPException(
+            status_code=503,
+            detail=_predictor_unavailable_detail(),
+            headers={"Retry-After": "5"},
+        )
+    if not catalog_screening_available:
+        raise HTTPException(
+            status_code=503,
+            detail=_catalog_detail(loaded_catalog_age_hours) or "Collision screening is temporarily unavailable.",
+            headers={"Retry-After": "3600"},
+        )
+    return predictor
 
 # ---------------------------------------------------------------------------
 # Rate limiting (simple in-memory, per-IP)
@@ -106,17 +151,26 @@ def check_rate_limit(client_ip: str) -> bool:
 def _load_model():
     """Load the ML model in a background thread so the server can respond to
     healthchecks immediately while the (slow) model load is in progress."""
-    global predictor, predictor_state, predictor_error, loaded_catalog_age_hours
+    global predictor, predictor_state, predictor_error, loaded_catalog_age_hours, catalog_screening_available
     predictor_state = "loading"
     predictor_error = None
     log.info("Background model load started...")
     try:
+        if CATALOG_SNAPSHOT_URI and SYNC_CATALOG_SNAPSHOT_ON_STARTUP:
+            try:
+                download_catalog_snapshot(CATALOG_SNAPSHOT_URI, CATALOG_PATH)
+            except Exception:
+                log.exception(
+                    "Could not sync catalog snapshot %s; retaining bundled known-good catalog",
+                    CATALOG_SNAPSHOT_URI,
+                )
         loaded_catalog_age_hours = ensure_catalog_fresh(
             CATALOG_PATH,
             max_age_hours=CATALOG_MAX_AGE_HOURS,
             refresh=REFRESH_TLE_ON_STARTUP,
             allow_stale=ALLOW_STALE_CATALOG,
         )
+        catalog_screening_available = loaded_catalog_age_hours <= CATALOG_HARD_MAX_AGE_HOURS
         predictor = SatellitePredictor(
             model_path=MODEL_PATH,
             catalog_path=CATALOG_PATH,
@@ -125,10 +179,13 @@ def _load_model():
             batch_size=512,
         )
         predictor_state = "ready"
+        if not catalog_screening_available:
+            log.error(_catalog_detail(loaded_catalog_age_hours))
         log.info("✅ Predictor loaded successfully")
     except Exception as e:
         predictor_state = "error"
         predictor_error = str(e)
+        catalog_screening_available = False
         log.exception("Failed to load predictor")
         predictor = None
 
@@ -333,6 +390,8 @@ class HealthResponse(BaseModel):
     timestamp: str
     device: str
     catalog_age_hours: Optional[float] = None
+    catalog_state: str = "unavailable"
+    screening_available: bool = False
     detail: Optional[str] = None
 
 
@@ -341,18 +400,25 @@ class HealthResponse(BaseModel):
 # ---------------------------------------------------------------------------
 @app.get("/health", response_model=HealthResponse, responses={503: {"model": HealthResponse}}, tags=["System"])
 async def health_check():
-    """Return 503 until the model and a sufficiently fresh catalog are ready."""
+    """Report service readiness separately from catalog screening safety."""
     loaded = predictor is not None and predictor.loaded
+    state = _catalog_state(loaded_catalog_age_hours)
+    screening_available = loaded and catalog_screening_available
     payload = HealthResponse(
-        status="ok" if loaded else predictor_state,
+        status=("ok" if state == "fresh" else "degraded") if loaded else predictor_state,
         model_loaded=loaded,
         catalog_size=len(predictor.catalog) if predictor else 0,
         version="1.0.0",
         timestamp=datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         device=str(predictor.device) if predictor else "none",
         catalog_age_hours=round(loaded_catalog_age_hours, 2) if loaded_catalog_age_hours is not None else None,
-        detail=(predictor_error if predictor_state == "error" else _predictor_unavailable_detail())
-        if not loaded else None,
+        catalog_state=state,
+        screening_available=screening_available,
+        detail=(
+            (predictor_error if predictor_state == "error" else _predictor_unavailable_detail())
+            if not loaded
+            else _catalog_detail(loaded_catalog_age_hours)
+        ),
     )
     if not loaded:
         return JSONResponse(
@@ -376,12 +442,7 @@ async def predict(request: PredictRequest, req: Request):
     - **norad_id**: NORAD ID (integer)
     - **top_n**: Number of threats to return (1–50, default 10)
     """
-    if not predictor or not predictor.loaded:
-        raise HTTPException(
-            status_code=503,
-            detail=_predictor_unavailable_detail(),
-            headers={"Retry-After": "5"},
-        )
+    active_predictor = _require_screening_predictor()
 
     if request.satellite_name is None and request.norad_id is None:
         raise HTTPException(
@@ -390,7 +451,7 @@ async def predict(request: PredictRequest, req: Request):
         )
 
     try:
-        result = predictor.predict(
+        result = active_predictor.predict(
             satellite_name=request.satellite_name,
             norad_id=request.norad_id,
             top_n=request.top_n,
@@ -411,18 +472,13 @@ async def predict_detailed(request: DetailedPredictRequest):
     Detailed prediction with temporal risk profiles, B-plane geometry,
     and Monte Carlo conjunction analysis.
     """
-    if not predictor or not predictor.loaded:
-        raise HTTPException(
-            status_code=503,
-            detail=_predictor_unavailable_detail(),
-            headers={"Retry-After": "5"},
-        )
+    active_predictor = _require_screening_predictor()
 
     if request.satellite_name is None and request.norad_id is None:
         raise HTTPException(status_code=422, detail="Provide either 'satellite_name' or 'norad_id'")
 
     try:
-        result = predictor.predict_detailed(
+        result = active_predictor.predict_detailed(
             satellite_name=request.satellite_name,
             norad_id=request.norad_id,
             top_n=request.top_n,
@@ -443,18 +499,13 @@ async def compute_maneuver(request: ManeuverRequest):
     Compute collision avoidance maneuver options (R/S/W directions)
     using Clohessy-Wiltshire linearized relative motion equations.
     """
-    if not predictor or not predictor.loaded:
-        raise HTTPException(
-            status_code=503,
-            detail=_predictor_unavailable_detail(),
-            headers={"Retry-After": "5"},
-        )
+    active_predictor = _require_screening_predictor()
 
     if request.satellite_name is None and request.norad_id is None:
         raise HTTPException(status_code=422, detail="Provide either 'satellite_name' or 'norad_id'")
 
     try:
-        result = predictor.compute_maneuver(
+        result = active_predictor.compute_maneuver(
             satellite_name=request.satellite_name,
             norad_id=request.norad_id,
             debris_norad_id=request.debris_norad_id,
@@ -475,18 +526,13 @@ async def interpret_prediction(request: InterpretRequest):
     Model interpretability: attention weights, gradient-based feature importance,
     and ensemble predictions from multiple checkpoints.
     """
-    if not predictor or not predictor.loaded:
-        raise HTTPException(
-            status_code=503,
-            detail=_predictor_unavailable_detail(),
-            headers={"Retry-After": "5"},
-        )
+    active_predictor = _require_screening_predictor()
 
     if request.satellite_name is None and request.norad_id is None:
         raise HTTPException(status_code=422, detail="Provide either 'satellite_name' or 'norad_id'")
 
     try:
-        result = predictor.interpret(
+        result = active_predictor.interpret(
             satellite_name=request.satellite_name,
             norad_id=request.norad_id,
             debris_norad_id=request.debris_norad_id,
