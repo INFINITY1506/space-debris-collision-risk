@@ -51,7 +51,8 @@ def download_tle(name: str, url: str, retries: int = 1, use_cache: bool = False)
     for attempt in range(1, retries + 1):
         try:
             log.info(f"[{attempt}/{retries}] Downloading {name} TLEs from {url}")
-            timeout = 120 if name in {"active", "starlink"} else 60
+            read_timeout = 120 if name in {"active", "starlink"} else 60
+            timeout = (15, read_timeout)
             resp = requests.get(url, headers=HEADERS, timeout=timeout)
             resp.raise_for_status()
             text = resp.text.strip()
