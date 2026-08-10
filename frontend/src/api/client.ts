@@ -67,6 +67,12 @@ export interface HealthResponse {
     detail?: string | null;
 }
 
+export interface WarmupRetryOptions {
+    onWarmup?: () => void;
+    timeoutMs?: number;
+    pollIntervalMs?: number;
+}
+
 // ────── Detailed / Advanced Types ─────────────────────────────────────────
 
 export interface TemporalRiskPoint {
@@ -191,7 +197,8 @@ export interface InterpretResponse {
 export async function predictCollision(
     satelliteName?: string,
     noradId?: number,
-    topN: number = 10
+    topN: number = 10,
+    warmupOptions: WarmupRetryOptions = {}
 ): Promise<PredictResponse> {
     const body = {
         ...(satelliteName && { satellite_name: satelliteName }),
@@ -199,11 +206,22 @@ export async function predictCollision(
         top_n: topN,
     };
 
-    const res = await fetch(`${API_BASE_URL}/predict`, {
+    const sendPrediction = () => fetch(`${API_BASE_URL}/predict`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
     });
+
+    let res = await sendPrediction();
+
+    if (res.status === 503) {
+        warmupOptions.onWarmup?.();
+        await waitForServiceReady(
+            warmupOptions.timeoutMs,
+            warmupOptions.pollIntervalMs,
+        );
+        res = await sendPrediction();
+    }
 
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
@@ -241,6 +259,32 @@ export async function getHealth(): Promise<HealthResponse> {
     // A 503 means startup is still refreshing data/loading the checkpoint.
     if (!res.ok && res.status !== 503) throw new Error(`HTTP ${res.status}`);
     return data;
+}
+
+export async function waitForServiceReady(
+    timeoutMs: number = 180_000,
+    pollIntervalMs: number = 3_000,
+): Promise<HealthResponse> {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        try {
+            const health = await getHealth();
+            if (health.model_loaded) return health;
+            if (health.status === 'error') {
+                throw new Error(health.detail || 'Service startup failed. Please try again later.');
+            }
+        } catch (error) {
+            if (error instanceof Error && error.message.startsWith('Service startup failed')) {
+                throw error;
+            }
+            // A transient network error during a cold start is safe to retry.
+        }
+
+        await new Promise(resolve => window.setTimeout(resolve, pollIntervalMs));
+    }
+
+    throw new Error('The service is taking longer than expected to start. Please retry in a moment.');
 }
 
 export async function predictDetailed(

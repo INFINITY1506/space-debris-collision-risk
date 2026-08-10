@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from fastapi.responses import JSONResponse
 
@@ -14,3 +15,7 @@ def test_health_returns_503_until_predictor_is_ready(monkeypatch):
 
     assert isinstance(response, JSONResponse)
     assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    payload = json.loads(response.body)
+    assert payload["status"] == "loading"
+    assert payload["detail"].startswith("Service is warming up")

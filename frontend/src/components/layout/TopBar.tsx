@@ -17,6 +17,15 @@ export function TopBar({ online, health, sidebarCollapsed, onToggleSidebar, onOp
         return () => clearInterval(t);
     }, []);
 
+    const warming = !online && health != null && health.status !== 'error';
+    const statusColor = online ? 'var(--r-low)' : warming ? 'var(--r-med)' : 'var(--r-high)';
+    const statusBackground = online
+        ? 'rgba(34,197,94,.08)'
+        : warming ? 'rgba(245,158,11,.08)' : 'rgba(239,68,68,.08)';
+    const statusBorder = online
+        ? 'rgba(34,197,94,.2)'
+        : warming ? 'rgba(245,158,11,.2)' : 'rgba(239,68,68,.2)';
+
     return (
         <div className="overlay-top glass topbar">
             <div className="topbar-brand">
@@ -37,9 +46,9 @@ export function TopBar({ online, health, sidebarCollapsed, onToggleSidebar, onOp
                 </div>
             </div>
             <div className="topbar-meta">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 4, background: online ? 'rgba(34,197,94,.08)' : 'rgba(239,68,68,.08)', border: `1px solid ${online ? 'rgba(34,197,94,.2)' : 'rgba(239,68,68,.2)'}` }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: online ? 'var(--r-low)' : 'var(--r-high)' }} />
-                    <span style={{ color: 'var(--t2)', fontSize: '.65rem' }}>{online ? 'Online' : 'Offline'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 4, background: statusBackground, border: `1px solid ${statusBorder}` }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: statusColor }} />
+                    <span style={{ color: 'var(--t2)', fontSize: '.65rem' }}>{online ? 'Online' : warming ? 'Warming up' : 'Offline'}</span>
                 </div>
                 {health && <span className="font-mono topbar-object-count" style={{ color: 'var(--t4)', fontSize: '.62rem' }}>{health.catalog_size.toLocaleString()} objects</span>}
                 <span className="font-mono topbar-clock" style={{ color: 'var(--t3)', fontSize: '.62rem', letterSpacing: '.05em' }}>{utc} UTC</span>

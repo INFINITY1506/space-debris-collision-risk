@@ -17,6 +17,7 @@ const AnalyticsDashboard = lazy(() => import('./components/AnalyticsDashboard').
 export default function App() {
     const [result, setResult] = useState<PredictResponse | null>(null);
     const [loading, setLoading] = useState(false);
+    const [loadingPhase, setLoadingPhase] = useState<'idle' | 'warming' | 'analyzing'>('idle');
     const [error, setError] = useState<string | null>(null);
     const [lastQuery, setLastQuery] = useState('');
     const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -41,16 +42,23 @@ export default function App() {
     }, []);
 
     const handleSearch = async (name: string) => {
-        setLoading(true); setError(null); setResult(null); setDetailed(null); setLastQuery(name);
+        setLoading(true);
+        setLoadingPhase(health?.model_loaded ? 'analyzing' : 'warming');
+        setError(null); setResult(null); setDetailed(null); setLastQuery(name);
         try {
             const noradId = /^\d+$/.test(name.trim()) ? parseInt(name.trim()) : undefined;
-            const data = await predictCollision(noradId ? undefined : name, noradId, 10);
+            const data = await predictCollision(noradId ? undefined : name, noradId, 10, {
+                onWarmup: () => setLoadingPhase('warming'),
+            });
             setResult(data);
             setRightPanelOpen(true);
             if (window.innerWidth < 900) setSidebarCollapsed(true);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'An unexpected error occurred');
-        } finally { setLoading(false); }
+        } finally {
+            setLoading(false);
+            setLoadingPhase('idle');
+        }
     };
 
     const handleDetailedAnalysis = async () => {
@@ -181,7 +189,12 @@ export default function App() {
             {loading && (
                 <div className="glass-modal">
                     <div className="glass-modal-content">
-                        <LoadingSpinner message="Analyzing collision risk..." subMessage={`Propagating ${lastQuery} against catalog debris`} />
+                        <LoadingSpinner
+                            message={loadingPhase === 'warming' ? 'Waking up Debris Sentinel...' : 'Analyzing collision risk...'}
+                            subMessage={loadingPhase === 'warming'
+                                ? 'Cloud Run is refreshing orbital data and loading the model. This can take up to two minutes after inactivity.'
+                                : `Propagating ${lastQuery} against catalog debris`}
+                        />
                     </div>
                 </div>
             )}

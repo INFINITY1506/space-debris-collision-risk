@@ -73,6 +73,13 @@ predictor_state = "not_started"
 predictor_error: Optional[str] = None
 loaded_catalog_age_hours: Optional[float] = None
 
+
+def _predictor_unavailable_detail() -> str:
+    """Return a user-facing readiness message without exposing internals."""
+    if predictor_state == "error":
+        return "Service startup failed. Please try again later."
+    return "Service is warming up while the orbital catalog and model load. Please retry shortly."
+
 # ---------------------------------------------------------------------------
 # Rate limiting (simple in-memory, per-IP)
 # ---------------------------------------------------------------------------
@@ -344,10 +351,15 @@ async def health_check():
         timestamp=datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         device=str(predictor.device) if predictor else "none",
         catalog_age_hours=round(loaded_catalog_age_hours, 2) if loaded_catalog_age_hours is not None else None,
-        detail=predictor_error,
+        detail=(predictor_error if predictor_state == "error" else _predictor_unavailable_detail())
+        if not loaded else None,
     )
     if not loaded:
-        return JSONResponse(status_code=503, content=payload.model_dump())
+        return JSONResponse(
+            status_code=503,
+            content=payload.model_dump(),
+            headers={"Retry-After": "5"},
+        )
     return payload
 
 
@@ -367,7 +379,8 @@ async def predict(request: PredictRequest, req: Request):
     if not predictor or not predictor.loaded:
         raise HTTPException(
             status_code=503,
-            detail="Model not loaded. Start the server after training is complete."
+            detail=_predictor_unavailable_detail(),
+            headers={"Retry-After": "5"},
         )
 
     if request.satellite_name is None and request.norad_id is None:
@@ -399,7 +412,11 @@ async def predict_detailed(request: DetailedPredictRequest):
     and Monte Carlo conjunction analysis.
     """
     if not predictor or not predictor.loaded:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+        raise HTTPException(
+            status_code=503,
+            detail=_predictor_unavailable_detail(),
+            headers={"Retry-After": "5"},
+        )
 
     if request.satellite_name is None and request.norad_id is None:
         raise HTTPException(status_code=422, detail="Provide either 'satellite_name' or 'norad_id'")
@@ -427,7 +444,11 @@ async def compute_maneuver(request: ManeuverRequest):
     using Clohessy-Wiltshire linearized relative motion equations.
     """
     if not predictor or not predictor.loaded:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+        raise HTTPException(
+            status_code=503,
+            detail=_predictor_unavailable_detail(),
+            headers={"Retry-After": "5"},
+        )
 
     if request.satellite_name is None and request.norad_id is None:
         raise HTTPException(status_code=422, detail="Provide either 'satellite_name' or 'norad_id'")
@@ -455,7 +476,11 @@ async def interpret_prediction(request: InterpretRequest):
     and ensemble predictions from multiple checkpoints.
     """
     if not predictor or not predictor.loaded:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+        raise HTTPException(
+            status_code=503,
+            detail=_predictor_unavailable_detail(),
+            headers={"Retry-After": "5"},
+        )
 
     if request.satellite_name is None and request.norad_id is None:
         raise HTTPException(status_code=422, detail="Provide either 'satellite_name' or 'norad_id'")
