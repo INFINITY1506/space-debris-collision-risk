@@ -10,18 +10,18 @@ export function BottomBar() {
 
     return (
         <div className="overlay-bottom glass bottom-bar">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--r-low)' }} />
-                    <span className="font-mono" style={{ color: 'var(--t3)' }}>Active</span>
+            <div className="bottom-bar-legend">
+                <div>
+                    <i className="legend-dot legend-dot--active" />
+                    <span className="font-mono">Active spacecraft</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--r-high)' }} />
-                    <span className="font-mono" style={{ color: 'var(--t3)' }}>Debris</span>
+                <div>
+                    <i className="legend-dot legend-dot--debris" />
+                    <span className="font-mono">Debris object</span>
                 </div>
             </div>
-            <span className="bottom-bar-summary">Debris Sentinel v1.0 &middot; Physics-ranked screening &middot; Research Use Only</span>
-            <span className="font-mono bottom-bar-clock" style={{ color: 'var(--t4)', letterSpacing: '.05em' }}>{utc} UTC</span>
+            <span className="bottom-bar-summary">CelesTrak TLE / SGP4 / Research screening only</span>
+            <span className="font-mono bottom-bar-clock">UTC {utc}</span>
         </div>
     );
 }

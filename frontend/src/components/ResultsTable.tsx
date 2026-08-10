@@ -44,7 +44,7 @@ export function ResultsTable({ threats, satellite, meta }: Props) {
         : <svg width="8" height="8" viewBox="0 0 10 10" fill="var(--accent)" style={{ marginLeft: 3, display: 'inline' }}><path d={desc ? "M5 9L2 5h6L5 9z" : "M5 1l3 4H2L5 1z"} /></svg>;
 
     return (
-        <div className="anim-fade-2" style={{ overflow: 'hidden', background: 'rgba(255,255,255,.02)', borderRadius: 8, border: '1px solid var(--glass-border)' }}>
+        <div className="results-table anim-fade-2" style={{ overflow: 'hidden' }}>
             <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--glass-border)' }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                     <div>

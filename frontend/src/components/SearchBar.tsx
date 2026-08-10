@@ -166,7 +166,7 @@ export function SearchBar({ onSearch, loading }: Props) {
                         )}
                     </div>
                     <button type="submit" className="btn" disabled={loading || !q.trim()}
-                        style={{ padding: '9px 14px', fontSize: '.75rem', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5, borderRadius: 6 }}>
+                        style={{ padding: '9px 14px', fontSize: '.75rem', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}>
                         {loading
                             ? <><div style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,.3)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />Analyzing</>
                             : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 12h14M12 5l7 7-7 7" /></svg>Analyze</>}

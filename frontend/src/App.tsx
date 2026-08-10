@@ -23,7 +23,9 @@ export default function App() {
     const [health, setHealth] = useState<HealthResponse | null>(null);
     const [detailed, setDetailed] = useState<DetailedPredictResponse | null>(null);
     const [detailedLoading, setDetailedLoading] = useState(false);
-    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(
+        () => typeof window !== 'undefined' && window.innerWidth <= 640,
+    );
     const [rightPanelOpen, setRightPanelOpen] = useState(false);
     const [aboutOpen, setAboutOpen] = useState(false);
 
@@ -85,6 +87,26 @@ export default function App() {
                 <GlobeView onSelectSatellite={handleSearch} selectedSatName={result?.satellite?.name} />
             </Suspense>
 
+            {!result && !loading && !error && (
+                <section className={`mission-intro ${sidebarCollapsed ? 'mission-intro--wide' : ''}`}>
+                    <div className="mission-intro__index">DS / 01</div>
+                    <div className="mission-intro__eyebrow">
+                        <span>Near-Earth object screening</span>
+                        <span>Seven-day horizon</span>
+                    </div>
+                    <h1>See the crowded<br />orbit.</h1>
+                    <p>
+                        Select an active spacecraft to screen public debris trajectories,
+                        rank close approaches, and inspect the geometry behind each result.
+                    </p>
+                    <div className="mission-intro__facts">
+                        <span><b>SGP4</b> propagation</span>
+                        <span><b>{health?.catalog_size ? health.catalog_size.toLocaleString() : '—'}</b> tracked objects</span>
+                        <span><b>Public</b> TLE data</span>
+                    </div>
+                </section>
+            )}
+
             {/* Top bar */}
             <TopBar
                 online={online}
@@ -96,6 +118,11 @@ export default function App() {
 
             {/* Left sidebar — search & satellite info */}
             <Sidebar collapsed={sidebarCollapsed}>
+                <div className="console-heading">
+                    <span className="console-heading__step">01 / SCREEN</span>
+                    <h2>Conjunction query</h2>
+                    <p>Choose an active spacecraft or enter a NORAD catalog number.</p>
+                </div>
                 <SearchBar onSearch={handleSearch} loading={loading} />
 
                 {result && !loading && (
@@ -119,7 +146,7 @@ export default function App() {
                             <button
                                 onClick={() => setRightPanelOpen(true)}
                                 style={{
-                                    width: '100%', padding: '8px 12px', borderRadius: 6,
+                                    width: '100%', padding: '8px 12px', borderRadius: 2,
                                     border: '1px solid var(--accent)', background: 'var(--accent-m)',
                                     color: 'var(--accent)', fontSize: '.72rem', fontWeight: 600,
                                     cursor: 'pointer', letterSpacing: '.03em',
@@ -150,7 +177,7 @@ export default function App() {
                                 onClick={handleDetailedAnalysis}
                                 disabled={detailedLoading}
                                 style={{
-                                    width: '100%', padding: '10px 16px', borderRadius: 6,
+                                    width: '100%', padding: '10px 16px', borderRadius: 2,
                                     border: '1px solid var(--accent)', background: 'var(--accent-m)',
                                     color: 'var(--accent)', fontSize: '.75rem', fontWeight: 600,
                                     cursor: detailedLoading ? 'wait' : 'pointer', letterSpacing: '.03em',

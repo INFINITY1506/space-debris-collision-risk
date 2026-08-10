@@ -4,7 +4,7 @@ export function SatelliteCard({ satellite: s, time, pairs }: { satellite: Satell
     const type = s.altitude_km < 2000 ? 'LEO' : s.altitude_km > 35286 && s.altitude_km < 36286 ? 'GEO' : 'MEO';
 
     return (
-        <div className="card anim-fade" style={{ padding: '10px 12px' }}>
+        <div className="card satellite-card anim-fade" style={{ padding: '14px 15px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: '.82rem', fontWeight: 600, color: 'var(--t1)' }}>{s.name}</span>
                 <span className="font-mono" style={{ fontSize: '.58rem', fontWeight: 600, padding: '1px 5px', borderRadius: 3, color: 'var(--t2)', background: 'var(--accent-m)', border: '1px solid var(--brd)' }}>{type}</span>

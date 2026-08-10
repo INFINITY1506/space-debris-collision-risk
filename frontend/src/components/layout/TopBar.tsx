@@ -37,21 +37,24 @@ export function TopBar({ online, health, sidebarCollapsed, onToggleSidebar, onOp
                         }
                     </svg>
                 </button>
-                <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--accent-m)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
+                <div className="brand-mark" aria-hidden="true">
+                    <span />
                 </div>
-                <div>
-                    <div style={{ fontSize: '.78rem', fontWeight: 600, letterSpacing: '.04em', color: 'var(--t1)', lineHeight: 1.2 }}>DEBRIS SENTINEL</div>
-                    <div style={{ fontSize: '.55rem', color: 'var(--t4)', letterSpacing: '.06em', textTransform: 'uppercase', lineHeight: 1.2 }}>Collision Risk Intelligence</div>
+                <div className="brand-lockup">
+                    <div>DEBRIS / SENTINEL</div>
+                    <span>Orbital screening console</span>
                 </div>
             </div>
             <div className="topbar-meta">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 4, background: statusBackground, border: `1px solid ${statusBorder}` }}>
+                <div className="system-status" style={{ background: statusBackground, border: `1px solid ${statusBorder}` }}>
                     <div style={{ width: 6, height: 6, borderRadius: '50%', background: statusColor }} />
-                    <span style={{ color: 'var(--t2)', fontSize: '.65rem' }}>{online ? 'Online' : warming ? 'Warming up' : 'Offline'}</span>
+                    <span className="status-label">
+                        <span className="status-label-prefix">System </span>
+                        {online ? 'ready' : warming ? 'warming' : 'unavailable'}
+                    </span>
                 </div>
-                {health && <span className="font-mono topbar-object-count" style={{ color: 'var(--t4)', fontSize: '.62rem' }}>{health.catalog_size.toLocaleString()} objects</span>}
-                <span className="font-mono topbar-clock" style={{ color: 'var(--t3)', fontSize: '.62rem', letterSpacing: '.05em' }}>{utc} UTC</span>
+                {health && <span className="font-mono topbar-object-count">CAT {health.catalog_size.toLocaleString()}</span>}
+                <span className="font-mono topbar-clock">{utc}Z</span>
                 <button className="about-button" onClick={onOpenAbout} aria-label="About this project">About</button>
             </div>
         </div>
